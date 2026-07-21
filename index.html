@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Word.bank 字庫</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-app-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-auth-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-firestore-compat.js"></script>
 <style>
   body {
     font-family: "Helvetica Neue", Helvetica, Arial, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif;
@@ -46,6 +49,24 @@ window.onerror = function (msg, src, line) {
   bar.classList.remove('hidden');
 };
 
+// ---------- Firebase setup ----------
+var firebaseConfig = {
+  apiKey: "AIzaSyAYcld_LFKnyaCCDbEAl1y1HAJS-dkHm7o",
+  authDomain: "vocabularybank-9d575.firebaseapp.com",
+  projectId: "vocabularybank-9d575",
+  storageBucket: "vocabularybank-9d575.firebasestorage.app",
+  messagingSenderId: "705421581629",
+  appId: "1:705421581629:web:585d1d0dafa1fa09823954",
+  measurementId: "G-TTRVXP5RVR"
+};
+
+firebase.initializeApp(firebaseConfig);
+var auth = firebase.auth();
+var db = firebase.firestore();
+
+// Offline cache so the app still shows words without internet
+db.enablePersistence({ synchronizeTabs: true }).catch(function () { /* multi-tab or unsupported browser */ });
+
 // ---------- Inline SVG icons ----------
 function icon(paths, size, cls) {
   return '<svg width="' + (size || 16) + '" height="' + (size || 16) + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="' + (cls || '') + '">' + paths + '</svg>';
@@ -59,10 +80,14 @@ var IC = {
   arrow: function (s, c) { return icon('<line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>', s, c); },
   redo: function (s, c) { return icon('<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>', s, c); },
   volume: function (s, c) { return icon('<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>', s, c); },
-  loader: function (s, c) { return icon('<path d="M21 12a9 9 0 1 1-6.219-8.56"/>', s, 'spin ' + (c || '')); }
+  loader: function (s, c) { return icon('<path d="M21 12a9 9 0 1 1-6.219-8.56"/>', s, 'spin ' + (c || '')); },
+  logout: function (s, c) { return icon('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>', s, c); },
+  cloud: function (s, c) { return icon('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>', s, c); }
 };
 
-// ---------- Seed words ----------
+var GOOGLE_G = '<svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>';
+
+// ---------- Seed words (given to brand-new accounts) ----------
 var SEED_WORDS = [
   { id: 1, word: 'meticulous', pos: 'adjective', ipa: '/m\u0259\u02C8t\u026Ak.j\u0259.l\u0259s/', meaning: 'very careful and with great attention to every detail', example: 'Many hours of meticulous preparation have gone into writing the book.' },
   { id: 2, word: 'ubiquitous', pos: 'adjective', ipa: '/ju\u02D0\u02C8b\u026Ak.w\u026A.t\u0259s/', meaning: 'seeming to be everywhere or in several places at the same time', example: 'The mobile phone, that most ubiquitous of consumer-electronic appliances, is now used for far more than calls.' },
@@ -72,31 +97,30 @@ var SEED_WORDS = [
   { id: 6, word: 'scrutinize', pos: 'verb', ipa: '/\u02C8skru\u02D0.t\u0259n.a\u026Az/', meaning: 'to examine something very carefully in order to discover information', example: 'He scrutinized the men\u2019s faces carefully, trying to work out who was lying.' }
 ];
 
-// ---------- localStorage persistence ----------
-var STORAGE_KEY = 'wordbank.words.v1';
+var LEGACY_KEY = 'wordbank.words.v1'; // old localStorage-only version
 
-function loadWords() {
+// ---------- Local cache (fast paint + offline) ----------
+function loadCache(uid) {
   try {
-    var raw = localStorage.getItem(STORAGE_KEY);
-    if (raw !== null) {
-      var parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
+    var raw = localStorage.getItem('wordbank.cache.' + uid);
+    if (raw) { var p = JSON.parse(raw); if (Array.isArray(p)) return p; }
   } catch (e) { /* storage unavailable */ }
-  return SEED_WORDS.slice();
+  return [];
 }
-
-function saveWords() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state.words));
-  } catch (e) { /* storage unavailable */ }
+function saveCache(uid, words) {
+  try { localStorage.setItem('wordbank.cache.' + uid, JSON.stringify(words)); } catch (e) { /* storage unavailable */ }
 }
 
 // ---------- State ----------
 var POS_OPTIONS = ['noun', 'verb', 'adjective', 'adverb', 'phrasal verb', 'idiom', 'preposition', 'interjection', 'pronoun', 'conjunction'];
 
 var state = {
-  words: loadWords(),
+  authReady: false,
+  user: null,
+  signingIn: false,
+  authError: '',
+  syncError: '',
+  words: [],
   tab: 'bank',
   searchTerm: '',
   searching: false,
@@ -112,6 +136,8 @@ var state = {
 };
 
 var flashTimer = null;
+var unsubscribeWords = null;
+var didCheckSeed = false;
 
 // ---------- Helpers ----------
 function esc(s) {
@@ -156,10 +182,147 @@ function setFlash(msg) {
 
 var INPUT_CLASS = 'w-full border-2 border-black px-3 py-3 text-sm bg-white focus:outline-none focus:bg-neutral-100 placeholder-neutral-400';
 
+// ---------- Firestore: auth + live sync ----------
+function wordsRef() {
+  return db.collection('users').doc(state.user.uid).collection('words');
+}
+
+auth.onAuthStateChanged(function (u) {
+  state.user = u;
+  state.authReady = true;
+  state.signingIn = false;
+  didCheckSeed = false;
+  if (unsubscribeWords) { unsubscribeWords(); unsubscribeWords = null; }
+  if (u) {
+    state.words = loadCache(u.uid); // instant paint while cloud loads
+    startSync(u);
+  } else {
+    state.words = [];
+    state.tab = 'bank';
+    state.quiz = null;
+    state.senses = null;
+  }
+  render();
+});
+
+function startSync(u) {
+  unsubscribeWords = db.collection('users').doc(u.uid).collection('words')
+    .orderBy('createdAt', 'desc')
+    .onSnapshot(function (snap) {
+      var words = [];
+      snap.forEach(function (doc) {
+        var w = doc.data();
+        w.id = doc.id;
+        words.push(w);
+      });
+      if (words.length === 0) maybeSeed(u);
+      state.words = words;
+      saveCache(u.uid, words);
+      state.syncError = '';
+      if (state.cardIndex >= words.length) { state.cardIndex = 0; state.flipped = false; }
+      render();
+    }, function (err) {
+      state.syncError = 'Could not sync with the cloud \u7121\u6CD5\u540C\u6B65: ' + err.message;
+      render();
+    });
+}
+
+// First login on an empty account: migrate words saved by the old
+// localStorage-only version of this app, or fall back to the seed words.
+function maybeSeed(u) {
+  if (didCheckSeed) return;
+  didCheckSeed = true;
+  var userDoc = db.collection('users').doc(u.uid);
+  userDoc.get().then(function (doc) {
+    if (doc.exists && doc.data() && doc.data().seeded) return; // already initialised before
+    var initial = SEED_WORDS;
+    try {
+      var raw = localStorage.getItem(LEGACY_KEY);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) initial = parsed;
+      }
+    } catch (e) { /* no legacy data */ }
+    var batch = db.batch();
+    var ref = userDoc.collection('words');
+    var base = Date.now();
+    initial.forEach(function (w, i) {
+      batch.set(ref.doc(String(base - i)), {
+        word: w.word || '',
+        pos: w.pos || 'noun',
+        ipa: w.ipa || '',
+        meaning: w.meaning || '',
+        example: w.example || '',
+        createdAt: base - i
+      });
+    });
+    batch.set(userDoc, {
+      seeded: true,
+      name: u.displayName || '',
+      email: u.email || ''
+    }, { merge: true });
+    return batch.commit();
+  }).catch(function (err) {
+    state.syncError = 'Setup error \u521D\u59CB\u5316\u932F\u8AA4: ' + err.message;
+    render();
+  });
+}
+
+function signInGoogle() {
+  state.authError = '';
+  state.signingIn = true;
+  render();
+  var provider = new firebase.auth.GoogleAuthProvider();
+  auth.signInWithPopup(provider).catch(function (err) {
+    state.signingIn = false;
+    if (err.code === 'auth/popup-blocked') {
+      auth.signInWithRedirect(provider);
+      return;
+    }
+    if (err.code === 'auth/unauthorized-domain') {
+      state.authError = 'This website\u2019s domain is not authorised in Firebase. Add it under Authentication \u2192 Settings \u2192 Authorized domains. \u6B64\u7DB2\u57DF\u5C1A\u672A\u5728 Firebase \u63A7\u5236\u53F0\u4E2D\u6388\u6B0A\u3002';
+    } else if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
+      state.authError = err.message;
+    }
+    render();
+  });
+}
+
+// ---------- Render: sign-in / loading screens ----------
+function loadingHTML() {
+  return '<div class="min-h-screen flex items-center justify-center">' +
+    '<p class="flex items-center gap-3 text-xs uppercase tracking-widest text-neutral-500">' + IC.loader(18) + ' Loading \u8F09\u5165\u4E2D</p>' +
+  '</div>';
+}
+
+function signInHTML() {
+  return '<div class="pt-24">' +
+    '<p class="text-xs uppercase tracking-widest text-neutral-500 mb-2">\u8A5E\u5F59 \u00B7 Vocabulary \u00B7 \u55AE\u5B57</p>' +
+    '<h1 class="text-5xl sm:text-6xl font-bold tracking-tight leading-none">Word<span class="text-red-600">.</span>bank</h1>' +
+    '<div class="border-4 border-black mt-10 p-8">' +
+      '<p class="text-xs uppercase tracking-widest text-red-600 mb-3">Sign in \u767B\u5165</p>' +
+      '<h2 class="text-2xl font-bold tracking-tight leading-tight mb-3">Your words, on every device.</h2>' +
+      '<p class="text-sm text-neutral-600 mb-8 max-w-md">Sign in with your Google account. Your personal word bank is private and syncs automatically across your phone, tablet and computer. \u4F7F\u7528 Google \u5E33\u6236\u767B\u5165\uFF0C\u4F60\u7684\u500B\u4EBA\u5B57\u5EAB\u5C07\u81EA\u52D5\u5728\u6240\u6709\u88DD\u7F6E\u9593\u540C\u6B65\uFF0C\u4E14\u53EA\u6709\u4F60\u81EA\u5DF1\u770B\u5F97\u5230\u3002</p>' +
+      '<button data-action="google-signin" ' + (state.signingIn ? 'disabled' : '') + ' class="w-full sm:w-auto flex items-center justify-center gap-3 border-2 border-black bg-white hover:bg-neutral-100 disabled:opacity-50 text-xs font-bold uppercase tracking-widest px-8 py-4 transition-colors">' +
+        '<span class="pointer-events-none">' + (state.signingIn ? IC.loader(18) : GOOGLE_G) + '</span>' +
+        '<span class="pointer-events-none">Sign in with Google \u4EE5 Google \u767B\u5165</span>' +
+      '</button>' +
+      (state.authError ? '<p class="mt-6 text-sm border-l-4 border-red-600 pl-3 text-neutral-700 fade-in">' + esc(state.authError) + '</p>' : '') +
+    '</div>' +
+    footerHTML() +
+  '</div>';
+}
+
 // ---------- Render: header / tabs / footer ----------
 function headerHTML() {
+  var who = state.user ? (state.user.displayName || state.user.email || '') : '';
   return '' +
-  '<header class="pt-10 pb-6 border-b-8 border-black">' +
+  '<div class="flex justify-between items-center pt-4">' +
+    '<p class="flex items-center gap-2 text-xs uppercase tracking-widest text-neutral-500">' + IC.cloud(12) + ' ' + esc(who) + '</p>' +
+    '<button data-action="signout" class="flex items-center gap-2 text-xs uppercase tracking-widest text-neutral-500 hover:text-red-600 transition-colors"><span class="pointer-events-none">Sign out \u767B\u51FA</span><span class="pointer-events-none">' + IC.logout(12) + '</span></button>' +
+  '</div>' +
+  (state.syncError ? '<p class="mt-2 text-xs font-bold text-red-600">' + esc(state.syncError) + '</p>' : '') +
+  '<header class="pt-6 pb-6 border-b-8 border-black">' +
     '<p class="text-xs uppercase tracking-widest text-neutral-500 mb-2">\u8A5E\u5F59 \u00B7 Vocabulary \u00B7 \u55AE\u5B57</p>' +
     '<h1 class="text-5xl sm:text-6xl font-bold tracking-tight leading-none">Word<span class="text-red-600">.</span>bank</h1>' +
     '<div class="flex justify-between items-end mt-4">' +
@@ -287,7 +450,7 @@ function bankHTML() {
           (w.example ? '<p class="text-sm text-neutral-500 mt-1">\u300C' + esc(w.example) + '\u300D</p>' : '') +
         '</div>' +
         '<div class="col-span-1 flex justify-end">' +
-          '<button data-action="delete" data-id="' + w.id + '" title="Delete \u522A\u9664" class="text-neutral-300 hover:text-red-600 transition-colors"><span class="pointer-events-none">' + IC.trash(16) + '</span></button>' +
+          '<button data-action="delete" data-id="' + esc(w.id) + '" title="Delete \u522A\u9664" class="text-neutral-300 hover:text-red-600 transition-colors"><span class="pointer-events-none">' + IC.trash(16) + '</span></button>' +
         '</div>' +
       '</div>';
     });
@@ -428,8 +591,11 @@ function quizHTML() {
 
 // ---------- Main render ----------
 function render() {
+  var app = document.getElementById('app');
+  if (!state.authReady) { app.innerHTML = loadingHTML(); return; }
+  if (!state.user) { app.innerHTML = signInHTML(); return; }
   var content = state.tab === 'bank' ? bankHTML() : state.tab === 'cards' ? cardsHTML() : quizHTML();
-  document.getElementById('app').innerHTML = headerHTML() + tabsHTML() + content + footerHTML();
+  app.innerHTML = headerHTML() + tabsHTML() + content + footerHTML();
 }
 
 // ---------- Dictionary lookup ----------
@@ -477,8 +643,7 @@ function doLookup() {
         throw new Error('No definitions found for "' + term + '". Add it manually. \u67E5\u7121\u91CB\u7FA9\uFF0C\u8ACB\u624B\u52D5\u65B0\u589E\u3002');
       }
       collected.sort(function (a, b) { return (b.example ? 1 : 0) - (a.example ? 1 : 0); });
-      state.senses = collected.slice(0, 8);
-    })
+      state.senses = collected.slice(0, 8);    })
     .catch(function (err) {
       if (err instanceof TypeError) {
         state.searchError = 'Could not reach the dictionary service. Check your internet connection, or add the word manually. \u7121\u6CD5\u9023\u7DDA\u81F3\u5B57\u5178\u670D\u52D9\uFF0C\u8ACB\u6AA2\u67E5\u7DB2\u8DEF\u9023\u7DDA\u6216\u624B\u52D5\u65B0\u589E\u3002';
@@ -493,6 +658,16 @@ function doLookup() {
 }
 
 // ---------- Actions ----------
+function persistWord(entry) {
+  // Writes to Firestore; the live snapshot listener updates the UI,
+  // including instantly via latency compensation (works offline too).
+  var id = String(entry.createdAt);
+  wordsRef().doc(id).set(entry).catch(function (err) {
+    state.syncError = 'Could not save to the cloud \u7121\u6CD5\u5132\u5B58: ' + err.message;
+    render();
+  });
+}
+
 function saveSense(i) {
   var s = state.senses[i];
   if (!s) return;
@@ -511,15 +686,14 @@ function saveSense(i) {
     render();
     return;
   }
-  state.words.unshift({
-    id: Date.now(),
+  persistWord({
     word: s.word.toLowerCase(),
     pos: s.pos,
     ipa: s.ipa,
     meaning: s.meaning,
-    example: s.example
+    example: s.example,
+    createdAt: Date.now()
   });
-  saveWords();
   state.senses = null;
   state.searchTerm = '';
   state.cardIndex = 0;
@@ -534,15 +708,14 @@ function addWord() {
     render();
     return;
   }
-  state.words.unshift({
-    id: Date.now(),
+  persistWord({
     word: f.word.trim().toLowerCase(),
     pos: f.pos,
     ipa: f.ipa.trim(),
     meaning: f.meaning.trim(),
-    example: f.example.trim()
+    example: f.example.trim(),
+    createdAt: Date.now()
   });
-  saveWords();
   setFlash('"' + f.word.trim().toLowerCase() + '" added \u5DF2\u65B0\u589E');
   state.form = { word: '', pos: 'noun', ipa: '', meaning: '', example: '' };
   state.formError = '';
@@ -552,11 +725,12 @@ function addWord() {
 }
 
 function deleteWord(id) {
-  state.words = state.words.filter(function (w) { return w.id !== id; });
-  saveWords();
+  wordsRef().doc(String(id)).delete().catch(function (err) {
+    state.syncError = 'Could not delete \u7121\u6CD5\u522A\u9664: ' + err.message;
+    render();
+  });
   state.cardIndex = 0;
   state.flipped = false;
-  render();
 }
 
 function startQuiz() {
@@ -601,7 +775,11 @@ document.addEventListener('click', function (e) {
   if (!el) return;
   var action = el.getAttribute('data-action');
 
-  if (action === 'tab') {
+  if (action === 'google-signin') {
+    signInGoogle();
+  } else if (action === 'signout') {
+    auth.signOut();
+  } else if (action === 'tab') {
     state.tab = el.getAttribute('data-tab');
     state.flipped = false;
     render();
@@ -619,7 +797,7 @@ document.addEventListener('click', function (e) {
   } else if (action === 'add-word') {
     addWord();
   } else if (action === 'delete') {
-    deleteWord(parseInt(el.getAttribute('data-id'), 10));
+    deleteWord(el.getAttribute('data-id'));
   } else if (action === 'speak') {
     speak(el.getAttribute('data-word'));
   } else if (action === 'flip') {
