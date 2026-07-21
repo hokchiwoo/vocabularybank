@@ -1,9 +1,60 @@
-import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Plus, Trash2, ChevronLeft, ChevronRight, RotateCcw, Volume2,
-  Search, Loader2, ArrowRight
-} from 'lucide-react';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Word.bank 字庫</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif;
+  }
+  .card3d { perspective: 1000px; }
+  .card-inner {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    transform-style: preserve-3d;
+    transition: transform 0.45s;
+  }
+  .card-inner.flipped { transform: rotateY(180deg); }
+  .card-face {
+    position: absolute;
+    inset: 0;
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+  }
+  .card-back { transform: rotateY(180deg); }
+  .fade-in { animation: fadeIn 0.3s ease both; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spin { animation: spin 1s linear infinite; }
+</style>
+</head>
+<body class="bg-white">
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect } = React;
+
+// ---------- Inline SVG icons (lucide paths) ----------
+const Icon = ({ children, size = 16, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+    className={className}>{children}</svg>
+);
+const SearchIcon = (p) => <Icon {...p}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></Icon>;
+const PlusIcon = (p) => <Icon {...p}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></Icon>;
+const TrashIcon = (p) => <Icon {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></Icon>;
+const ChevronLeftIcon = (p) => <Icon {...p}><polyline points="15 18 9 12 15 6"/></Icon>;
+const ChevronRightIcon = (p) => <Icon {...p}><polyline points="9 18 15 12 9 6"/></Icon>;
+const ArrowRightIcon = (p) => <Icon {...p}><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></Icon>;
+const RotateCcwIcon = (p) => <Icon {...p}><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></Icon>;
+const VolumeIcon = (p) => <Icon {...p}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></Icon>;
+const LoaderIcon = (p) => <Icon {...p} className={'spin ' + (p.className || '')}><path d="M21 12a9 9 0 1 1-6.219-8.56"/></Icon>;
 
 // ---------- Preloaded dictionary-style entries ----------
 const SEED_WORDS = [
@@ -57,6 +108,20 @@ const SEED_WORDS = [
   },
 ];
 
+// ---------- localStorage persistence ----------
+const STORAGE_KEY = 'wordbank.words.v1';
+
+const loadWords = () => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw !== null) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) { /* storage unavailable or corrupted */ }
+  return SEED_WORDS;
+};
+
 // ---------- Helpers ----------
 const shuffle = (arr) => {
   const a = [...arr];
@@ -69,20 +134,23 @@ const shuffle = (arr) => {
 
 const makeCloze = (sentence, word) => {
   const stem = word.length > 4 ? word.slice(0, word.length - 1) : word;
-  const regex = new RegExp(`\\b${stem}\\w*\\b`, 'gi');
+  const regex = new RegExp('\\b' + stem + '\\w*\\b', 'gi');
   const blanked = sentence.replace(regex, '________');
   return blanked.includes('________') ? blanked : sentence + ' ( ________ )';
 };
 
 const POS_OPTIONS = ['noun', 'verb', 'adjective', 'adverb', 'phrasal verb', 'idiom', 'preposition', 'interjection', 'pronoun', 'conjunction'];
 
-const HELVETICA = {
-  fontFamily: '"Helvetica Neue", Helvetica, Arial, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif',
-};
-
-export default function VocabBankApp() {
-  const [words, setWords] = useState(SEED_WORDS);
+function VocabBankApp() {
+  const [words, setWords] = useState(loadWords);
   const [tab, setTab] = useState('bank');
+
+  // Save to localStorage whenever the word bank changes
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(words));
+    } catch (e) { /* storage unavailable */ }
+  }, [words]);
 
   // ---- Lookup state ----
   const [searchTerm, setSearchTerm] = useState('');
@@ -113,11 +181,11 @@ export default function VocabBankApp() {
     setSavedFlash('');
     try {
       const res = await fetch(
-        `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(term)}`
+        'https://api.dictionaryapi.dev/api/v2/entries/en/' + encodeURIComponent(term)
       );
       if (!res.ok) {
         if (res.status === 404) {
-          throw new Error(`No entry found for "${term}" 查無此字。Check the spelling, or add it manually.`);
+          throw new Error('No entry found for "' + term + '" 查無此字。Check the spelling, or add it manually.');
         }
         throw new Error('The dictionary service returned an error. Try again. 字典服務發生錯誤，請重試。');
       }
@@ -127,7 +195,7 @@ export default function VocabBankApp() {
       data.forEach((entry) => {
         const ipa =
           entry.phonetic ||
-          (entry.phonetics || []).find((p) => p.text)?.text ||
+          ((entry.phonetics || []).find((p) => p.text) || {}).text ||
           '';
         (entry.meanings || []).forEach((m) => {
           (m.definitions || []).forEach((d) => {
@@ -143,14 +211,14 @@ export default function VocabBankApp() {
       });
 
       if (collected.length === 0) {
-        throw new Error(`No definitions found for "${term}". Add it manually. 查無釋義，請手動新增。`);
+        throw new Error('No definitions found for "' + term + '". Add it manually. 查無釋義，請手動新增。');
       }
       collected.sort((a, b) => (b.example ? 1 : 0) - (a.example ? 1 : 0));
       setSenses(collected.slice(0, 8));
     } catch (err) {
       if (err instanceof TypeError) {
         setSearchError(
-          'Could not reach the dictionary service (it may be blocked in this preview environment). Add the word manually — lookup will work when the app runs on a normal website. 無法連線至字典服務（預覽環境可能封鎖了連線），請先手動新增。'
+          'Could not reach the dictionary service. Check your internet connection, or add the word manually. 無法連線至字典服務，請檢查網路連線或手動新增。'
         );
       } else {
         setSearchError(err.message);
@@ -186,7 +254,7 @@ export default function VocabBankApp() {
     setWords((w) => [newWord, ...w]);
     setSenses(null);
     setSearchTerm('');
-    setSavedFlash(`"${newWord.word}" added 已新增`);
+    setSavedFlash('"' + newWord.word + '" added 已新增');
     setCardIndex(0);
     setTimeout(() => setSavedFlash(''), 2500);
   };
@@ -209,7 +277,7 @@ export default function VocabBankApp() {
     setFormError('');
     setShowForm(false);
     setCardIndex(0);
-    setSavedFlash(`"${newWord.word}" added 已新增`);
+    setSavedFlash('"' + newWord.word + '" added 已新增');
     setTimeout(() => setSavedFlash(''), 2500);
   };
 
@@ -269,7 +337,7 @@ export default function VocabBankApp() {
     'w-full border-2 border-black px-3 py-3 text-sm bg-white focus:outline-none focus:bg-neutral-100 placeholder-neutral-400';
 
   return (
-    <div className="min-h-screen bg-white text-black" style={HELVETICA}>
+    <div className="min-h-screen bg-white text-black">
       <div className="max-w-3xl mx-auto px-4 pb-16">
 
         {/* ===== Masthead ===== */}
@@ -296,12 +364,12 @@ export default function VocabBankApp() {
             <button
               key={key}
               onClick={() => { setTab(key); setFlipped(false); }}
-              className={`py-4 px-2 text-left border-r-2 last:border-r-0 border-black transition-colors ${
+              className={'py-4 px-2 text-left border-r-2 last:border-r-0 border-black transition-colors ' + (
                 tab === key ? 'bg-black text-white' : 'bg-white text-black hover:bg-neutral-100'
-              }`}
+              )}
             >
               <span className="block text-base font-bold leading-tight">{label}</span>
-              <span className={`block text-xs uppercase tracking-widest ${tab === key ? 'text-neutral-400' : 'text-neutral-500'}`}>
+              <span className={'block text-xs uppercase tracking-widest ' + (tab === key ? 'text-neutral-400' : 'text-neutral-500')}>
                 {sub}
               </span>
             </button>
@@ -318,7 +386,7 @@ export default function VocabBankApp() {
               </p>
               <div className="flex">
                 <input
-                  className="flex-1 border-2 border-black border-r-0 px-3 py-3 text-lg font-bold bg-white focus:outline-none focus:bg-neutral-100 placeholder-neutral-300"
+                  className="flex-1 min-w-0 border-2 border-black border-r-0 px-3 py-3 text-lg font-bold bg-white focus:outline-none focus:bg-neutral-100 placeholder-neutral-300"
                   placeholder="serendipity"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
@@ -329,71 +397,60 @@ export default function VocabBankApp() {
                   disabled={searching || !searchTerm.trim()}
                   className="flex items-center gap-2 bg-red-600 hover:bg-red-700 disabled:bg-neutral-300 text-white text-xs font-bold uppercase tracking-widest px-6 transition-colors"
                 >
-                  {searching ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+                  {searching ? <LoaderIcon size={16} /> : <SearchIcon size={16} />}
                   <span className="hidden sm:inline">查詢</span>
                 </button>
               </div>
 
               {searchError && (
-                <p className="mt-4 text-sm border-l-4 border-red-600 pl-3 text-neutral-700">
+                <p className="mt-4 text-sm border-l-4 border-red-600 pl-3 text-neutral-700 fade-in">
                   {searchError}
                 </p>
               )}
 
               {savedFlash && (
-                <motion.p
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="mt-4 text-xs uppercase tracking-widest text-red-600 font-bold"
-                >
+                <p className="mt-4 text-xs uppercase tracking-widest text-red-600 font-bold fade-in">
                   {savedFlash}
-                </motion.p>
+                </p>
               )}
 
               {/* ---- Sense picker ---- */}
-              <AnimatePresence>
-                {senses && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="overflow-hidden"
-                  >
-                    <p className="text-xs uppercase tracking-widest text-neutral-500 mt-6 mb-3">
-                      {senses.length} sense{senses.length > 1 ? 's' : ''} — select one to save 選擇一項釋義儲存
-                    </p>
-                    <div className="border-t-2 border-black max-h-80 overflow-y-auto">
-                      {senses.map((s, i) => (
-                        <button
-                          key={i}
-                          onClick={() => saveSense(s)}
-                          className="w-full text-left border-b border-neutral-300 py-4 px-1 hover:bg-neutral-100 transition-colors group"
-                        >
-                          <div className="flex items-baseline gap-3 flex-wrap mb-1">
-                            <span className="text-xs font-bold text-red-600">{String(i + 1).padStart(2, '0')}</span>
-                            <span className="font-bold">{s.word}</span>
-                            <span className="text-xs uppercase tracking-widest text-neutral-500">{s.pos}</span>
-                            {s.ipa && <span className="text-xs text-neutral-400">{s.ipa}</span>}
-                            {!s.example && (
-                              <span className="text-xs uppercase tracking-widest text-red-600">no example 無例句</span>
-                            )}
-                          </div>
-                          <p className="text-sm text-neutral-800 pl-7">{s.meaning}</p>
-                          {s.example && (
-                            <p className="text-sm text-neutral-500 pl-7 mt-1">「{s.example}」</p>
+              {senses && (
+                <div className="fade-in">
+                  <p className="text-xs uppercase tracking-widest text-neutral-500 mt-6 mb-3">
+                    {senses.length} sense{senses.length > 1 ? 's' : ''} — select one to save 選擇一項釋義儲存
+                  </p>
+                  <div className="border-t-2 border-black max-h-80 overflow-y-auto">
+                    {senses.map((s, i) => (
+                      <button
+                        key={i}
+                        onClick={() => saveSense(s)}
+                        className="w-full text-left border-b border-neutral-300 py-4 px-1 hover:bg-neutral-100 transition-colors"
+                      >
+                        <div className="flex items-baseline gap-3 flex-wrap mb-1">
+                          <span className="text-xs font-bold text-red-600">{String(i + 1).padStart(2, '0')}</span>
+                          <span className="font-bold">{s.word}</span>
+                          <span className="text-xs uppercase tracking-widest text-neutral-500">{s.pos}</span>
+                          {s.ipa && <span className="text-xs text-neutral-400">{s.ipa}</span>}
+                          {!s.example && (
+                            <span className="text-xs uppercase tracking-widest text-red-600">no example 無例句</span>
                           )}
-                        </button>
-                      ))}
-                    </div>
-                    <button
-                      onClick={() => setSenses(null)}
-                      className="text-xs uppercase tracking-widest text-neutral-500 hover:text-black mt-3"
-                    >
-                      Cancel 取消 ×
-                    </button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+                        </div>
+                        <p className="text-sm text-neutral-800 pl-7">{s.meaning}</p>
+                        {s.example && (
+                          <p className="text-sm text-neutral-500 pl-7 mt-1">「{s.example}」</p>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => setSenses(null)}
+                    className="text-xs uppercase tracking-widest text-neutral-500 hover:text-black mt-3"
+                  >
+                    Cancel 取消 ×
+                  </button>
+                </div>
+              )}
             </section>
 
             {/* ---- Manual entry ---- */}
@@ -402,67 +459,58 @@ export default function VocabBankApp() {
                 onClick={() => setShowForm((s) => !s)}
                 className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest hover:text-red-600 transition-colors"
               >
-                <Plus size={14} className={`transition-transform ${showForm ? 'rotate-45' : ''}`} />
+                <PlusIcon size={14} className={'transition-transform ' + (showForm ? 'rotate-45' : '')} />
                 {showForm ? 'Close manual entry 關閉手動新增' : 'Add manually 手動新增'}
               </button>
 
-              <AnimatePresence>
-                {showForm && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="overflow-hidden"
+              {showForm && (
+                <div className="mt-6 space-y-3 fade-in">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <input
+                      className={inputClass}
+                      placeholder="Word 單字"
+                      value={form.word}
+                      onChange={(e) => setForm({ ...form, word: e.target.value })}
+                    />
+                    <select
+                      className={inputClass + ' appearance-none'}
+                      value={form.pos}
+                      onChange={(e) => setForm({ ...form, pos: e.target.value })}
+                    >
+                      {POS_OPTIONS.map((p) => <option key={p}>{p}</option>)}
+                    </select>
+                  </div>
+                  <input
+                    className={inputClass}
+                    placeholder="Pronunciation / IPA 音標（選填）"
+                    value={form.ipa}
+                    onChange={(e) => setForm({ ...form, ipa: e.target.value })}
+                  />
+                  <textarea
+                    className={inputClass}
+                    rows={2}
+                    placeholder="Meaning / definition 釋義"
+                    value={form.meaning}
+                    onChange={(e) => setForm({ ...form, meaning: e.target.value })}
+                  />
+                  <textarea
+                    className={inputClass}
+                    rows={2}
+                    placeholder="Example sentence containing the word 含此單字的例句"
+                    value={form.example}
+                    onChange={(e) => setForm({ ...form, example: e.target.value })}
+                  />
+                  {formError && (
+                    <p className="text-sm border-l-4 border-red-600 pl-3 text-neutral-700">{formError}</p>
+                  )}
+                  <button
+                    onClick={addWord}
+                    className="w-full bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest py-4 transition-colors"
                   >
-                    <div className="mt-6 space-y-3">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <input
-                          className={inputClass}
-                          placeholder="Word 單字"
-                          value={form.word}
-                          onChange={(e) => setForm({ ...form, word: e.target.value })}
-                        />
-                        <select
-                          className={inputClass + ' appearance-none'}
-                          value={form.pos}
-                          onChange={(e) => setForm({ ...form, pos: e.target.value })}
-                        >
-                          {POS_OPTIONS.map((p) => <option key={p}>{p}</option>)}
-                        </select>
-                      </div>
-                      <input
-                        className={inputClass}
-                        placeholder="Pronunciation / IPA 音標（選填）"
-                        value={form.ipa}
-                        onChange={(e) => setForm({ ...form, ipa: e.target.value })}
-                      />
-                      <textarea
-                        className={inputClass}
-                        rows={2}
-                        placeholder="Meaning / definition 釋義"
-                        value={form.meaning}
-                        onChange={(e) => setForm({ ...form, meaning: e.target.value })}
-                      />
-                      <textarea
-                        className={inputClass}
-                        rows={2}
-                        placeholder="Example sentence containing the word 含此單字的例句"
-                        value={form.example}
-                        onChange={(e) => setForm({ ...form, example: e.target.value })}
-                      />
-                      {formError && (
-                        <p className="text-sm border-l-4 border-red-600 pl-3 text-neutral-700">{formError}</p>
-                      )}
-                      <button
-                        onClick={addWord}
-                        className="w-full bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest py-4 transition-colors"
-                      >
-                        Save entry 儲存
-                      </button>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+                    Save entry 儲存
+                  </button>
+                </div>
+              )}
             </section>
 
             {/* ---- Entry list ---- */}
@@ -471,12 +519,9 @@ export default function VocabBankApp() {
                 02 — Entries 詞條 ({words.length})
               </p>
               {words.map((w, idx) => (
-                <motion.div
+                <div
                   key={w.id}
-                  layout
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="border-b border-neutral-300 py-5 grid grid-cols-12 gap-3"
+                  className="border-b border-neutral-300 py-5 grid grid-cols-12 gap-3 fade-in"
                 >
                   <div className="col-span-2 sm:col-span-1">
                     <span className="text-xs font-bold text-red-600">
@@ -493,7 +538,7 @@ export default function VocabBankApp() {
                         className="text-neutral-400 hover:text-red-600 transition-colors"
                         title="Listen 發音"
                       >
-                        <Volume2 size={14} />
+                        <VolumeIcon size={14} />
                       </button>
                     </div>
                     <p className="text-sm text-neutral-800 mt-1">{w.meaning}</p>
@@ -507,10 +552,10 @@ export default function VocabBankApp() {
                       className="text-neutral-300 hover:text-red-600 transition-colors"
                       title="Delete 刪除"
                     >
-                      <Trash2 size={16} />
+                      <TrashIcon size={16} />
                     </button>
                   </div>
-                </motion.div>
+                </div>
               ))}
               {words.length === 0 && (
                 <p className="text-sm text-neutral-400 py-10">
@@ -527,7 +572,7 @@ export default function VocabBankApp() {
             {words.length === 0 ? (
               <p className="text-sm text-neutral-400 py-10">Add some words first. 請先新增單字。</p>
             ) : (
-              <>
+              <React.Fragment>
                 <div className="flex justify-between items-baseline mb-4">
                   <p className="text-xs uppercase tracking-widest">
                     字卡 {String(cardIndex + 1).padStart(2, '0')} / {String(words.length).padStart(2, '0')}
@@ -537,21 +582,13 @@ export default function VocabBankApp() {
                   </p>
                 </div>
 
-                <div className="w-full h-80 cursor-pointer" style={{ perspective: '1000px' }} onClick={() => setFlipped((f) => !f)}>
-                  <motion.div
-                    className="relative w-full h-full"
-                    style={{ transformStyle: 'preserve-3d' }}
-                    animate={{ rotateY: flipped ? 180 : 0 }}
-                    transition={{ duration: 0.45 }}
-                  >
+                <div className="w-full h-80 cursor-pointer card3d" onClick={() => setFlipped((f) => !f)}>
+                  <div className={'card-inner ' + (flipped ? 'flipped' : '')}>
                     {/* Front */}
-                    <div
-                      className="absolute inset-0 bg-black text-white flex flex-col justify-between p-8"
-                      style={{ backfaceVisibility: 'hidden' }}
-                    >
+                    <div className="card-face bg-black text-white flex flex-col justify-between p-8">
                       <div className="flex justify-between items-start">
                         <span className="text-xs uppercase tracking-widest text-neutral-400">{currentCard.pos}</span>
-                        <span className="w-4 h-4 bg-red-600 block" />
+                        <span className="w-4 h-4 bg-red-600 block"></span>
                       </div>
                       <div>
                         <span className="text-4xl sm:text-5xl font-bold tracking-tight break-words">
@@ -563,16 +600,13 @@ export default function VocabBankApp() {
                             onClick={(e) => { e.stopPropagation(); speak(currentCard.word); }}
                             className="text-neutral-400 hover:text-white transition-colors"
                           >
-                            <Volume2 size={18} />
+                            <VolumeIcon size={18} />
                           </button>
                         </div>
                       </div>
                     </div>
                     {/* Back */}
-                    <div
-                      className="absolute inset-0 bg-white border-4 border-black flex flex-col justify-between p-8"
-                      style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
-                    >
+                    <div className="card-face card-back bg-white border-4 border-black flex flex-col justify-between p-8">
                       <div>
                         <p className="text-xs uppercase tracking-widest text-red-600 mb-2">釋義 — Meaning</p>
                         <p className="text-lg font-bold leading-snug">{currentCard.meaning}</p>
@@ -584,7 +618,7 @@ export default function VocabBankApp() {
                         </div>
                       )}
                     </div>
-                  </motion.div>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-3 border-2 border-black mt-6">
@@ -592,7 +626,7 @@ export default function VocabBankApp() {
                     onClick={() => { setFlipped(false); setCardIndex((i) => (i - 1 + words.length) % words.length); }}
                     className="flex items-center justify-center py-4 border-r-2 border-black hover:bg-neutral-100 transition-colors"
                   >
-                    <ChevronLeft size={18} />
+                    <ChevronLeftIcon size={18} />
                   </button>
                   <button
                     onClick={() => setFlipped((f) => !f)}
@@ -604,10 +638,10 @@ export default function VocabBankApp() {
                     onClick={() => { setFlipped(false); setCardIndex((i) => (i + 1) % words.length); }}
                     className="flex items-center justify-center py-4 border-l-2 border-black hover:bg-neutral-100 transition-colors"
                   >
-                    <ChevronRight size={18} />
+                    <ChevronRightIcon size={18} />
                   </button>
                 </div>
-              </>
+              </React.Fragment>
             )}
           </div>
         )}
@@ -635,15 +669,11 @@ export default function VocabBankApp() {
                   className="flex items-center gap-3 bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest px-8 py-4 transition-colors"
                 >
                   Start 開始 — {Math.min(10, words.filter((w) => w.example).length)} questions
-                  <ArrowRight size={14} />
+                  <ArrowRightIcon size={14} />
                 </button>
               </div>
             ) : quiz.finished ? (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="border-4 border-black p-8"
-              >
+              <div className="border-4 border-black p-8 fade-in">
                 <p className="text-xs uppercase tracking-widest text-red-600 mb-3">結果 — Result</p>
                 <p className="text-6xl sm:text-7xl font-bold tracking-tight">
                   {quiz.score}<span className="text-neutral-300">/{quiz.questions.length}</span>
@@ -659,9 +689,9 @@ export default function VocabBankApp() {
                   onClick={startQuiz}
                   className="flex items-center gap-3 bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest px-8 py-4 transition-colors"
                 >
-                  <RotateCcw size={14} /> Retake 再測一次
+                  <RotateCcwIcon size={14} /> Retake 再測一次
                 </button>
-              </motion.div>
+              </div>
             ) : (
               (() => {
                 const q = quiz.questions[quiz.current];
@@ -680,7 +710,7 @@ export default function VocabBankApp() {
                     <div className="w-full h-1 bg-neutral-200 mb-8">
                       <div
                         className="h-1 bg-red-600 transition-all duration-300"
-                        style={{ width: `${(quiz.current / quiz.questions.length) * 100}%` }}
+                        style={{ width: ((quiz.current / quiz.questions.length) * 100) + '%' }}
                       />
                     </div>
 
@@ -707,7 +737,7 @@ export default function VocabBankApp() {
                             key={choice}
                             onClick={() => answerQuiz(choice)}
                             disabled={quiz.selected !== null}
-                            className={`w-full flex items-baseline gap-4 text-left border-b-2 border-black px-2 py-4 font-bold transition-colors ${style}`}
+                            className={'w-full flex items-baseline gap-4 text-left border-b-2 border-black px-2 py-4 font-bold transition-colors ' + style}
                           >
                             <span className="text-xs">{['A', 'B', 'C', 'D'][ci]}</span>
                             <span className="text-lg">{choice}</span>
@@ -722,22 +752,20 @@ export default function VocabBankApp() {
                       })}
                     </div>
 
-                    <AnimatePresence>
-                      {quiz.selected !== null && (
-                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-6">
-                          <p className="text-sm text-neutral-600 border-l-4 border-black pl-3 mb-6">
-                            「{q.target.example}」
-                          </p>
-                          <button
-                            onClick={nextQuestion}
-                            className="w-full flex items-center justify-center gap-3 bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest py-4 transition-colors"
-                          >
-                            {quiz.current + 1 >= quiz.questions.length ? 'See result 看結果' : 'Next 下一題'}
-                            <ArrowRight size={14} />
-                          </button>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                    {quiz.selected !== null && (
+                      <div className="mt-6 fade-in">
+                        <p className="text-sm text-neutral-600 border-l-4 border-black pl-3 mb-6">
+                          「{q.target.example}」
+                        </p>
+                        <button
+                          onClick={nextQuestion}
+                          className="w-full flex items-center justify-center gap-3 bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest py-4 transition-colors"
+                        >
+                          {quiz.current + 1 >= quiz.questions.length ? 'See result 看結果' : 'Next 下一題'}
+                          <ArrowRightIcon size={14} />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })()
@@ -754,3 +782,8 @@ export default function VocabBankApp() {
     </div>
   );
 }
+
+ReactDOM.createRoot(document.getElementById('root')).render(<VocabBankApp />);
+</script>
+</body>
+</html>
