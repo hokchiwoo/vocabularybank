@@ -5,9 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Word.bank 字庫</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <style>
   body {
     font-family: "Helvetica Neue", Helvetica, Arial, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif;
@@ -34,756 +31,632 @@
   .spin { animation: spin 1s linear infinite; }
 </style>
 </head>
-<body class="bg-white">
-<div id="root"></div>
+<body class="bg-white text-black">
 
-<script type="text/babel" data-presets="react">
-const { useState, useEffect } = React;
+<div id="errorBar" class="hidden bg-red-600 text-white text-xs font-bold px-4 py-3"></div>
+<div id="app" class="max-w-3xl mx-auto px-4 pb-16"></div>
 
-// ---------- Inline SVG icons (lucide paths) ----------
-const Icon = ({ children, size = 16, className = '' }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
-    stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-    className={className}>{children}</svg>
-);
-const SearchIcon = (p) => <Icon {...p}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></Icon>;
-const PlusIcon = (p) => <Icon {...p}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></Icon>;
-const TrashIcon = (p) => <Icon {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></Icon>;
-const ChevronLeftIcon = (p) => <Icon {...p}><polyline points="15 18 9 12 15 6"/></Icon>;
-const ChevronRightIcon = (p) => <Icon {...p}><polyline points="9 18 15 12 9 6"/></Icon>;
-const ArrowRightIcon = (p) => <Icon {...p}><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></Icon>;
-const RotateCcwIcon = (p) => <Icon {...p}><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></Icon>;
-const VolumeIcon = (p) => <Icon {...p}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></Icon>;
-const LoaderIcon = (p) => <Icon {...p} className={'spin ' + (p.className || '')}><path d="M21 12a9 9 0 1 1-6.219-8.56"/></Icon>;
+<script>
+'use strict';
 
-// ---------- Preloaded dictionary-style entries ----------
-const SEED_WORDS = [
-  {
-    id: 1,
-    word: 'meticulous',
-    pos: 'adjective',
-    ipa: '/məˈtɪk.jə.ləs/',
-    meaning: 'very careful and with great attention to every detail',
-    example: 'Many hours of meticulous preparation have gone into writing the book.',
-  },
-  {
-    id: 2,
-    word: 'ubiquitous',
-    pos: 'adjective',
-    ipa: '/juːˈbɪk.wɪ.təs/',
-    meaning: 'seeming to be everywhere or in several places at the same time',
-    example: 'The mobile phone, that most ubiquitous of consumer-electronic appliances, is now used for far more than calls.',
-  },
-  {
-    id: 3,
-    word: 'resilient',
-    pos: 'adjective',
-    ipa: '/rɪˈzɪl.i.ənt/',
-    meaning: 'able to be happy or successful again after something difficult or bad has happened',
-    example: 'She is a resilient girl - she will not be unhappy for long.',
-  },
-  {
-    id: 4,
-    word: 'ephemeral',
-    pos: 'adjective',
-    ipa: '/ɪˈfem.ər.əl/',
-    meaning: 'lasting for only a short time',
-    example: 'Fame in the world of rock and pop is largely ephemeral.',
-  },
-  {
-    id: 5,
-    word: 'candid',
-    pos: 'adjective',
-    ipa: '/ˈkæn.dɪd/',
-    meaning: 'honest and telling the truth, especially about something difficult or painful',
-    example: 'To be candid with you, I think you are making a dreadful mistake.',
-  },
-  {
-    id: 6,
-    word: 'scrutinize',
-    pos: 'verb',
-    ipa: '/ˈskruː.tən.aɪz/',
-    meaning: 'to examine something very carefully in order to discover information',
-    example: 'He scrutinized the men\u2019s faces carefully, trying to work out who was lying.',
-  },
+// ---------- Error display (instead of a silent blank page) ----------
+window.onerror = function (msg, src, line) {
+  var bar = document.getElementById('errorBar');
+  bar.textContent = 'Error 錯誤: ' + msg + ' (line ' + line + ')';
+  bar.classList.remove('hidden');
+};
+
+// ---------- Inline SVG icons ----------
+function icon(paths, size, cls) {
+  return '<svg width="' + (size || 16) + '" height="' + (size || 16) + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="' + (cls || '') + '">' + paths + '</svg>';
+}
+var IC = {
+  search: function (s, c) { return icon('<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>', s, c); },
+  plus: function (s, c) { return icon('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>', s, c); },
+  trash: function (s, c) { return icon('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>', s, c); },
+  left: function (s, c) { return icon('<polyline points="15 18 9 12 15 6"/>', s, c); },
+  right: function (s, c) { return icon('<polyline points="9 18 15 12 9 6"/>', s, c); },
+  arrow: function (s, c) { return icon('<line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>', s, c); },
+  redo: function (s, c) { return icon('<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>', s, c); },
+  volume: function (s, c) { return icon('<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>', s, c); },
+  loader: function (s, c) { return icon('<path d="M21 12a9 9 0 1 1-6.219-8.56"/>', s, 'spin ' + (c || '')); }
+};
+
+// ---------- Seed words ----------
+var SEED_WORDS = [
+  { id: 1, word: 'meticulous', pos: 'adjective', ipa: '/m\u0259\u02C8t\u026Ak.j\u0259.l\u0259s/', meaning: 'very careful and with great attention to every detail', example: 'Many hours of meticulous preparation have gone into writing the book.' },
+  { id: 2, word: 'ubiquitous', pos: 'adjective', ipa: '/ju\u02D0\u02C8b\u026Ak.w\u026A.t\u0259s/', meaning: 'seeming to be everywhere or in several places at the same time', example: 'The mobile phone, that most ubiquitous of consumer-electronic appliances, is now used for far more than calls.' },
+  { id: 3, word: 'resilient', pos: 'adjective', ipa: '/r\u026A\u02C8z\u026Al.i.\u0259nt/', meaning: 'able to be happy or successful again after something difficult or bad has happened', example: 'She is a resilient girl - she will not be unhappy for long.' },
+  { id: 4, word: 'ephemeral', pos: 'adjective', ipa: '/\u026A\u02C8fem.\u0259r.\u0259l/', meaning: 'lasting for only a short time', example: 'Fame in the world of rock and pop is largely ephemeral.' },
+  { id: 5, word: 'candid', pos: 'adjective', ipa: '/\u02C8k\u00E6n.d\u026Ad/', meaning: 'honest and telling the truth, especially about something difficult or painful', example: 'To be candid with you, I think you are making a dreadful mistake.' },
+  { id: 6, word: 'scrutinize', pos: 'verb', ipa: '/\u02C8skru\u02D0.t\u0259n.a\u026Az/', meaning: 'to examine something very carefully in order to discover information', example: 'He scrutinized the men\u2019s faces carefully, trying to work out who was lying.' }
 ];
 
 // ---------- localStorage persistence ----------
-const STORAGE_KEY = 'wordbank.words.v1';
+var STORAGE_KEY = 'wordbank.words.v1';
 
-const loadWords = () => {
+function loadWords() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    var raw = localStorage.getItem(STORAGE_KEY);
     if (raw !== null) {
-      const parsed = JSON.parse(raw);
+      var parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) return parsed;
     }
-  } catch (e) { /* storage unavailable or corrupted */ }
-  return SEED_WORDS;
+  } catch (e) { /* storage unavailable */ }
+  return SEED_WORDS.slice();
+}
+
+function saveWords() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state.words));
+  } catch (e) { /* storage unavailable */ }
+}
+
+// ---------- State ----------
+var POS_OPTIONS = ['noun', 'verb', 'adjective', 'adverb', 'phrasal verb', 'idiom', 'preposition', 'interjection', 'pronoun', 'conjunction'];
+
+var state = {
+  words: loadWords(),
+  tab: 'bank',
+  searchTerm: '',
+  searching: false,
+  searchError: '',
+  senses: null,
+  savedFlash: '',
+  showForm: false,
+  form: { word: '', pos: 'noun', ipa: '', meaning: '', example: '' },
+  formError: '',
+  cardIndex: 0,
+  flipped: false,
+  quiz: null
 };
+
+var flashTimer = null;
 
 // ---------- Helpers ----------
-const shuffle = (arr) => {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function shuffle(arr) {
+  var a = arr.slice();
+  for (var i = a.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var t = a[i]; a[i] = a[j]; a[j] = t;
   }
   return a;
-};
+}
 
-const makeCloze = (sentence, word) => {
-  const stem = word.length > 4 ? word.slice(0, word.length - 1) : word;
-  const regex = new RegExp('\\b' + stem + '\\w*\\b', 'gi');
-  const blanked = sentence.replace(regex, '________');
-  return blanked.includes('________') ? blanked : sentence + ' ( ________ )';
-};
+function makeCloze(sentence, word) {
+  var stem = word.length > 4 ? word.slice(0, word.length - 1) : word;
+  var regex = new RegExp('\\b' + stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\w*\\b', 'gi');
+  var blanked = sentence.replace(regex, '________');
+  return blanked.indexOf('________') !== -1 ? blanked : sentence + ' ( ________ )';
+}
 
-const POS_OPTIONS = ['noun', 'verb', 'adjective', 'adverb', 'phrasal verb', 'idiom', 'preposition', 'interjection', 'pronoun', 'conjunction'];
+function pad2(n) { return String(n).padStart(2, '0'); }
+function pad3(n) { return String(n).padStart(3, '0'); }
 
-function VocabBankApp() {
-  const [words, setWords] = useState(loadWords);
-  const [tab, setTab] = useState('bank');
+function speak(text) {
+  try {
+    var u = new SpeechSynthesisUtterance(text);
+    u.lang = 'en-GB';
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  } catch (e) { /* not available */ }
+}
 
-  // Save to localStorage whenever the word bank changes
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(words));
-    } catch (e) { /* storage unavailable */ }
-  }, [words]);
+function setFlash(msg) {
+  state.savedFlash = msg;
+  if (flashTimer) clearTimeout(flashTimer);
+  flashTimer = setTimeout(function () { state.savedFlash = ''; render(); }, 2500);
+}
 
-  // ---- Lookup state ----
-  const [searchTerm, setSearchTerm] = useState('');
-  const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState('');
-  const [senses, setSenses] = useState(null);
-  const [savedFlash, setSavedFlash] = useState('');
+var INPUT_CLASS = 'w-full border-2 border-black px-3 py-3 text-sm bg-white focus:outline-none focus:bg-neutral-100 placeholder-neutral-400';
 
-  // ---- Manual form state ----
-  const [form, setForm] = useState({ word: '', pos: 'noun', ipa: '', meaning: '', example: '' });
-  const [showForm, setShowForm] = useState(false);
-  const [formError, setFormError] = useState('');
+// ---------- Render: header / tabs / footer ----------
+function headerHTML() {
+  return '' +
+  '<header class="pt-10 pb-6 border-b-8 border-black">' +
+    '<p class="text-xs uppercase tracking-widest text-neutral-500 mb-2">\u8A5E\u5F59 \u00B7 Vocabulary \u00B7 \u55AE\u5B57</p>' +
+    '<h1 class="text-5xl sm:text-6xl font-bold tracking-tight leading-none">Word<span class="text-red-600">.</span>bank</h1>' +
+    '<div class="flex justify-between items-end mt-4">' +
+      '<p class="text-xs uppercase tracking-widest">\u67E5\u8A62 Lookup \u2014 \u5B57\u5361 Flashcards \u2014 \u586B\u7A7A Cloze</p>' +
+      '<p class="text-xs uppercase tracking-widest text-neutral-500">N\u00B0 ' + pad3(state.words.length) + '</p>' +
+    '</div>' +
+  '</header>';
+}
 
-  // ---- Flashcard state ----
-  const [cardIndex, setCardIndex] = useState(0);
-  const [flipped, setFlipped] = useState(false);
+function tabsHTML() {
+  var tabs = [
+    { key: 'bank', label: '\u5B57\u5EAB', sub: 'Word Bank' },
+    { key: 'cards', label: '\u5B57\u5361', sub: 'Flashcards' },
+    { key: 'quiz', label: '\u6E2C\u9A57', sub: 'Cloze Test' }
+  ];
+  var html = '<nav class="grid grid-cols-3 border-b-2 border-black">';
+  tabs.forEach(function (t) {
+    var active = state.tab === t.key;
+    html += '<button data-action="tab" data-tab="' + t.key + '" class="py-4 px-2 text-left border-r-2 last:border-r-0 border-black transition-colors ' +
+      (active ? 'bg-black text-white' : 'bg-white text-black hover:bg-neutral-100') + '">' +
+      '<span class="block text-base font-bold leading-tight pointer-events-none">' + t.label + '</span>' +
+      '<span class="block text-xs uppercase tracking-widest pointer-events-none ' + (active ? 'text-neutral-400' : 'text-neutral-500') + '">' + t.sub + '</span>' +
+    '</button>';
+  });
+  html += '</nav>';
+  return html;
+}
 
-  // ---- Quiz state ----
-  const [quiz, setQuiz] = useState(null);
+function footerHTML() {
+  return '<footer class="mt-16 pt-4 border-t-2 border-black flex justify-between">' +
+    '<p class="text-xs uppercase tracking-widest text-neutral-500">Word.bank \u5B57\u5EAB</p>' +
+    '<p class="text-xs uppercase tracking-widest text-neutral-500">2026</p>' +
+  '</footer>';
+}
 
-  // ---------- Dictionary lookup ----------
-  const lookupWord = async () => {
-    const term = searchTerm.trim().toLowerCase();
-    if (!term) return;
-    setSearching(true);
-    setSearchError('');
-    setSenses(null);
-    setSavedFlash('');
-    try {
-      const res = await fetch(
-        'https://api.dictionaryapi.dev/api/v2/entries/en/' + encodeURIComponent(term)
-      );
+// ---------- Render: word bank tab ----------
+function bankHTML() {
+  var html = '<div>';
+
+  // Lookup section
+  html += '<section class="py-8 border-b-2 border-black">' +
+    '<p class="text-xs uppercase tracking-widest mb-3">01 \u2014 Look up a word \u67E5\u8A62\u55AE\u5B57</p>' +
+    '<div class="flex">' +
+      '<input id="searchInput" class="flex-1 min-w-0 border-2 border-black border-r-0 px-3 py-3 text-lg font-bold bg-white focus:outline-none focus:bg-neutral-100 placeholder-neutral-300" placeholder="serendipity" value="' + esc(state.searchTerm) + '">' +
+      '<button data-action="lookup" ' + (state.searching ? 'disabled' : '') + ' class="flex items-center gap-2 bg-red-600 hover:bg-red-700 disabled:bg-neutral-300 text-white text-xs font-bold uppercase tracking-widest px-6 transition-colors">' +
+        '<span class="pointer-events-none">' + (state.searching ? IC.loader(16) : IC.search(16)) + '</span>' +
+        '<span class="hidden sm:inline pointer-events-none">\u67E5\u8A62</span>' +
+      '</button>' +
+    '</div>';
+
+  if (state.searchError) {
+    html += '<p class="mt-4 text-sm border-l-4 border-red-600 pl-3 text-neutral-700 fade-in">' + esc(state.searchError) + '</p>';
+  }
+  if (state.savedFlash) {
+    html += '<p class="mt-4 text-xs uppercase tracking-widest text-red-600 font-bold fade-in">' + esc(state.savedFlash) + '</p>';
+  }
+
+  if (state.senses) {
+    html += '<div class="fade-in">' +
+      '<p class="text-xs uppercase tracking-widest text-neutral-500 mt-6 mb-3">' +
+        state.senses.length + ' sense' + (state.senses.length > 1 ? 's' : '') + ' \u2014 select one to save \u9078\u64C7\u4E00\u9805\u91CB\u7FA9\u5132\u5B58' +
+      '</p>' +
+      '<div class="border-t-2 border-black max-h-80 overflow-y-auto">';
+    state.senses.forEach(function (s, i) {
+      html += '<button data-action="save-sense" data-i="' + i + '" class="w-full text-left border-b border-neutral-300 py-4 px-1 hover:bg-neutral-100 transition-colors">' +
+        '<div class="flex items-baseline gap-3 flex-wrap mb-1 pointer-events-none">' +
+          '<span class="text-xs font-bold text-red-600">' + pad2(i + 1) + '</span>' +
+          '<span class="font-bold">' + esc(s.word) + '</span>' +
+          '<span class="text-xs uppercase tracking-widest text-neutral-500">' + esc(s.pos) + '</span>' +
+          (s.ipa ? '<span class="text-xs text-neutral-400">' + esc(s.ipa) + '</span>' : '') +
+          (!s.example ? '<span class="text-xs uppercase tracking-widest text-red-600">no example \u7121\u4F8B\u53E5</span>' : '') +
+        '</div>' +
+        '<p class="text-sm text-neutral-800 pl-7 pointer-events-none">' + esc(s.meaning) + '</p>' +
+        (s.example ? '<p class="text-sm text-neutral-500 pl-7 mt-1 pointer-events-none">\u300C' + esc(s.example) + '\u300D</p>' : '') +
+      '</button>';
+    });
+    html += '</div>' +
+      '<button data-action="cancel-senses" class="text-xs uppercase tracking-widest text-neutral-500 hover:text-black mt-3">Cancel \u53D6\u6D88 \u00D7</button>' +
+    '</div>';
+  }
+  html += '</section>';
+
+  // Manual entry
+  html += '<section class="py-6 border-b-2 border-black">' +
+    '<button data-action="toggle-form" class="flex items-center gap-2 text-xs font-bold uppercase tracking-widest hover:text-red-600 transition-colors">' +
+      '<span class="pointer-events-none ' + (state.showForm ? 'rotate-45 inline-block' : 'inline-block') + '">' + IC.plus(14) + '</span>' +
+      '<span class="pointer-events-none">' + (state.showForm ? 'Close manual entry \u95DC\u9589\u624B\u52D5\u65B0\u589E' : 'Add manually \u624B\u52D5\u65B0\u589E') + '</span>' +
+    '</button>';
+
+  if (state.showForm) {
+    var posOpts = POS_OPTIONS.map(function (p) {
+      return '<option' + (state.form.pos === p ? ' selected' : '') + '>' + p + '</option>';
+    }).join('');
+    html += '<div class="mt-6 space-y-3 fade-in">' +
+      '<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">' +
+        '<input data-form="word" class="' + INPUT_CLASS + '" placeholder="Word \u55AE\u5B57" value="' + esc(state.form.word) + '">' +
+        '<select data-form="pos" class="' + INPUT_CLASS + ' appearance-none">' + posOpts + '</select>' +
+      '</div>' +
+      '<input data-form="ipa" class="' + INPUT_CLASS + '" placeholder="Pronunciation / IPA \u97F3\u6A19\uFF08\u9078\u586B\uFF09" value="' + esc(state.form.ipa) + '">' +
+      '<textarea data-form="meaning" rows="2" class="' + INPUT_CLASS + '" placeholder="Meaning / definition \u91CB\u7FA9">' + esc(state.form.meaning) + '</textarea>' +
+      '<textarea data-form="example" rows="2" class="' + INPUT_CLASS + '" placeholder="Example sentence containing the word \u542B\u6B64\u55AE\u5B57\u7684\u4F8B\u53E5">' + esc(state.form.example) + '</textarea>' +
+      (state.formError ? '<p class="text-sm border-l-4 border-red-600 pl-3 text-neutral-700">' + esc(state.formError) + '</p>' : '') +
+      '<button data-action="add-word" class="w-full bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest py-4 transition-colors">Save entry \u5132\u5B58</button>' +
+    '</div>';
+  }
+  html += '</section>';
+
+  // Entry list
+  html += '<section class="pt-6">' +
+    '<p class="text-xs uppercase tracking-widest text-neutral-500 mb-2">02 \u2014 Entries \u8A5E\u689D (' + state.words.length + ')</p>';
+  if (state.words.length === 0) {
+    html += '<p class="text-sm text-neutral-400 py-10">Empty. Look up your first word above. \u5B57\u5EAB\u662F\u7A7A\u7684\uFF0C\u8ACB\u5148\u67E5\u8A62\u4F60\u7684\u7B2C\u4E00\u500B\u55AE\u5B57\u3002</p>';
+  } else {
+    state.words.forEach(function (w, idx) {
+      html += '<div class="border-b border-neutral-300 py-5 grid grid-cols-12 gap-3 fade-in">' +
+        '<div class="col-span-2 sm:col-span-1"><span class="text-xs font-bold text-red-600">' + pad2(state.words.length - idx) + '</span></div>' +
+        '<div class="col-span-9 sm:col-span-10">' +
+          '<div class="flex items-baseline gap-3 flex-wrap">' +
+            '<span class="text-xl font-bold tracking-tight">' + esc(w.word) + '</span>' +
+            '<span class="text-xs uppercase tracking-widest text-neutral-500">' + esc(w.pos) + '</span>' +
+            (w.ipa ? '<span class="text-xs text-neutral-400">' + esc(w.ipa) + '</span>' : '') +
+            '<button data-action="speak" data-word="' + esc(w.word) + '" title="Listen \u767C\u97F3" class="text-neutral-400 hover:text-red-600 transition-colors"><span class="pointer-events-none">' + IC.volume(14) + '</span></button>' +
+          '</div>' +
+          '<p class="text-sm text-neutral-800 mt-1">' + esc(w.meaning) + '</p>' +
+          (w.example ? '<p class="text-sm text-neutral-500 mt-1">\u300C' + esc(w.example) + '\u300D</p>' : '') +
+        '</div>' +
+        '<div class="col-span-1 flex justify-end">' +
+          '<button data-action="delete" data-id="' + w.id + '" title="Delete \u522A\u9664" class="text-neutral-300 hover:text-red-600 transition-colors"><span class="pointer-events-none">' + IC.trash(16) + '</span></button>' +
+        '</div>' +
+      '</div>';
+    });
+  }
+  html += '</section></div>';
+  return html;
+}
+
+// ---------- Render: flashcards tab ----------
+function cardsHTML() {
+  if (state.words.length === 0) {
+    return '<div class="pt-8"><p class="text-sm text-neutral-400 py-10">Add some words first. \u8ACB\u5148\u65B0\u589E\u55AE\u5B57\u3002</p></div>';
+  }
+  var w = state.words[state.cardIndex];
+  return '<div class="pt-8">' +
+    '<div class="flex justify-between items-baseline mb-4">' +
+      '<p class="text-xs uppercase tracking-widest">\u5B57\u5361 ' + pad2(state.cardIndex + 1) + ' / ' + pad2(state.words.length) + '</p>' +
+      '<p class="text-xs uppercase tracking-widest text-neutral-500">Tap to flip \u9EDE\u64CA\u7FFB\u9762</p>' +
+    '</div>' +
+    '<div data-action="flip" class="w-full h-80 cursor-pointer card3d">' +
+      '<div id="cardInner" class="card-inner' + (state.flipped ? ' flipped' : '') + '">' +
+        '<div class="card-face bg-black text-white flex flex-col justify-between p-8 pointer-events-none">' +
+          '<div class="flex justify-between items-start">' +
+            '<span class="text-xs uppercase tracking-widest text-neutral-400">' + esc(w.pos) + '</span>' +
+            '<span class="w-4 h-4 bg-red-600 block"></span>' +
+          '</div>' +
+          '<div>' +
+            '<span class="text-4xl sm:text-5xl font-bold tracking-tight break-words">' + esc(w.word) + '</span>' +
+            '<div class="flex items-center gap-3 mt-3">' +
+              '<span class="text-neutral-400 text-sm">' + esc(w.ipa) + '</span>' +
+              '<button data-action="speak" data-word="' + esc(w.word) + '" class="pointer-events-auto text-neutral-400 hover:text-white transition-colors"><span class="pointer-events-none">' + IC.volume(18) + '</span></button>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="card-face card-back bg-white border-4 border-black flex flex-col justify-between p-8 pointer-events-none">' +
+          '<div>' +
+            '<p class="text-xs uppercase tracking-widest text-red-600 mb-2">\u91CB\u7FA9 \u2014 Meaning</p>' +
+            '<p class="text-lg font-bold leading-snug">' + esc(w.meaning) + '</p>' +
+          '</div>' +
+          (w.example ?
+            '<div><p class="text-xs uppercase tracking-widest text-neutral-500 mb-2">\u4F8B\u53E5 \u2014 Example</p>' +
+            '<p class="text-sm text-neutral-700">\u300C' + esc(w.example) + '\u300D</p></div>' : '') +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="grid grid-cols-3 border-2 border-black mt-6">' +
+      '<button data-action="prev-card" class="flex items-center justify-center py-4 border-r-2 border-black hover:bg-neutral-100 transition-colors"><span class="pointer-events-none">' + IC.left(18) + '</span></button>' +
+      '<button data-action="flip" class="py-4 text-xs font-bold uppercase tracking-widest bg-black text-white hover:bg-red-600 transition-colors"><span class="pointer-events-none">Flip \u7FFB\u9762</span></button>' +
+      '<button data-action="next-card" class="flex items-center justify-center py-4 border-l-2 border-black hover:bg-neutral-100 transition-colors"><span class="pointer-events-none">' + IC.right(18) + '</span></button>' +
+    '</div>' +
+  '</div>';
+}
+
+// ---------- Render: quiz tab ----------
+function quizHTML() {
+  var eligible = state.words.filter(function (w) { return w.example; });
+
+  if (eligible.length < 4) {
+    return '<div class="pt-8"><p class="text-sm text-neutral-400 py-10">You need at least 4 words with example sentences to generate a test. \u81F3\u5C11\u9700\u8981 4 \u500B\u542B\u4F8B\u53E5\u7684\u55AE\u5B57\u624D\u80FD\u7522\u751F\u6E2C\u9A57\u3002</p></div>';
+  }
+
+  if (!state.quiz) {
+    return '<div class="pt-8"><div class="border-4 border-black p-8">' +
+      '<p class="text-xs uppercase tracking-widest text-red-600 mb-3">Cloze recall \u586B\u7A7A\u6E2C\u9A57</p>' +
+      '<h2 class="text-3xl font-bold tracking-tight leading-tight mb-4">The word is removed.<br>You put it back.</h2>' +
+      '<p class="text-sm text-neutral-600 mb-8 max-w-md">Each target word is blanked out of its example sentence. Choose the correct word from four options. \u4F8B\u53E5\u4E2D\u7684\u76EE\u6A19\u55AE\u5B57\u5DF2\u88AB\u6316\u7A7A\uFF0C\u8ACB\u5F9E\u56DB\u500B\u9078\u9805\u4E2D\u9078\u51FA\u6B63\u78BA\u7684\u5B57\u3002</p>' +
+      '<button data-action="start-quiz" class="flex items-center gap-3 bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest px-8 py-4 transition-colors">' +
+        '<span class="pointer-events-none">Start \u958B\u59CB \u2014 ' + Math.min(10, eligible.length) + ' questions</span>' +
+        '<span class="pointer-events-none">' + IC.arrow(14) + '</span>' +
+      '</button>' +
+    '</div></div>';
+  }
+
+  if (state.quiz.finished) {
+    var q = state.quiz;
+    var verdict = q.score === q.questions.length
+      ? 'Perfect score. Outstanding recall. \u6EFF\u5206\uFF0C\u8A18\u61B6\u529B\u9A5A\u4EBA\u3002'
+      : q.score >= q.questions.length * 0.7
+        ? 'Good. Review the missed words in the flashcards. \u4E0D\u932F\uFF0C\u7528\u5B57\u5361\u8907\u7FD2\u7B54\u932F\u7684\u55AE\u5B57\u5427\u3002'
+        : 'Keep practising with the flashcards, then try again. \u7528\u5B57\u5361\u591A\u52A0\u7DF4\u7FD2\u5F8C\u518D\u8A66\u4E00\u6B21\u3002';
+    return '<div class="pt-8"><div class="border-4 border-black p-8 fade-in">' +
+      '<p class="text-xs uppercase tracking-widest text-red-600 mb-3">\u7D50\u679C \u2014 Result</p>' +
+      '<p class="text-6xl sm:text-7xl font-bold tracking-tight">' + q.score + '<span class="text-neutral-300">/' + q.questions.length + '</span></p>' +
+      '<p class="text-sm text-neutral-600 mt-4 mb-8 max-w-md">' + verdict + '</p>' +
+      '<button data-action="start-quiz" class="flex items-center gap-3 bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest px-8 py-4 transition-colors">' +
+        '<span class="pointer-events-none">' + IC.redo(14) + '</span><span class="pointer-events-none">Retake \u518D\u6E2C\u4E00\u6B21</span>' +
+      '</button>' +
+    '</div></div>';
+  }
+
+  var quiz = state.quiz;
+  var question = quiz.questions[quiz.current];
+  var pct = (quiz.current / quiz.questions.length) * 100;
+  var letters = ['A', 'B', 'C', 'D'];
+
+  var html = '<div class="pt-8">' +
+    '<div class="flex justify-between items-baseline mb-2">' +
+      '<p class="text-xs uppercase tracking-widest">\u984C\u76EE ' + pad2(quiz.current + 1) + ' / ' + pad2(quiz.questions.length) + '</p>' +
+      '<p class="text-xs uppercase tracking-widest text-neutral-500">Score \u5F97\u5206 ' + quiz.score + '</p>' +
+    '</div>' +
+    '<div class="w-full h-1 bg-neutral-200 mb-8"><div class="h-1 bg-red-600 transition-all duration-300" style="width:' + pct + '%"></div></div>' +
+    '<p class="text-xs uppercase tracking-widest text-red-600 mb-3">Fill the gap \u586B\u7A7A</p>' +
+    '<p class="text-xl sm:text-2xl font-bold tracking-tight leading-snug mb-3">\u300C' + esc(question.cloze) + '\u300D</p>' +
+    '<p class="text-xs text-neutral-500 mb-8">' + esc(question.target.pos) + ' \u2014 ' + esc(question.target.meaning) + '</p>' +
+    '<div class="border-t-2 border-black">';
+
+  question.choices.forEach(function (choice, ci) {
+    var isCorrect = choice === question.target.word;
+    var isSelected = quiz.selected === choice;
+    var style = 'hover:bg-neutral-100';
+    if (quiz.selected !== null) {
+      if (isCorrect) style = 'bg-black text-white';
+      else if (isSelected) style = 'bg-red-600 text-white';
+      else style = 'text-neutral-300';
+    }
+    html += '<button data-action="answer" data-choice="' + esc(choice) + '" ' + (quiz.selected !== null ? 'disabled' : '') +
+      ' class="w-full flex items-baseline gap-4 text-left border-b-2 border-black px-2 py-4 font-bold transition-colors ' + style + '">' +
+      '<span class="text-xs pointer-events-none">' + letters[ci] + '</span>' +
+      '<span class="text-lg pointer-events-none">' + esc(choice) + '</span>' +
+      (quiz.selected !== null && isCorrect ? '<span class="ml-auto text-xs uppercase tracking-widest pointer-events-none">\u6B63\u78BA \u2713</span>' : '') +
+      (quiz.selected !== null && isSelected && !isCorrect ? '<span class="ml-auto text-xs uppercase tracking-widest pointer-events-none">\u932F\u8AA4 \u00D7</span>' : '') +
+    '</button>';
+  });
+  html += '</div>';
+
+  if (quiz.selected !== null) {
+    html += '<div class="mt-6 fade-in">' +
+      '<p class="text-sm text-neutral-600 border-l-4 border-black pl-3 mb-6">\u300C' + esc(question.target.example) + '\u300D</p>' +
+      '<button data-action="next-q" class="w-full flex items-center justify-center gap-3 bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest py-4 transition-colors">' +
+        '<span class="pointer-events-none">' + (quiz.current + 1 >= quiz.questions.length ? 'See result \u770B\u7D50\u679C' : 'Next \u4E0B\u4E00\u984C') + '</span>' +
+        '<span class="pointer-events-none">' + IC.arrow(14) + '</span>' +
+      '</button>' +
+    '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+// ---------- Main render ----------
+function render() {
+  var content = state.tab === 'bank' ? bankHTML() : state.tab === 'cards' ? cardsHTML() : quizHTML();
+  document.getElementById('app').innerHTML = headerHTML() + tabsHTML() + content + footerHTML();
+}
+
+// ---------- Dictionary lookup ----------
+function doLookup() {
+  var term = state.searchTerm.trim().toLowerCase();
+  if (!term || state.searching) return;
+  state.searching = true;
+  state.searchError = '';
+  state.senses = null;
+  state.savedFlash = '';
+  render();
+
+  fetch('https://api.dictionaryapi.dev/api/v2/entries/en/' + encodeURIComponent(term))
+    .then(function (res) {
       if (!res.ok) {
         if (res.status === 404) {
-          throw new Error('No entry found for "' + term + '" 查無此字。Check the spelling, or add it manually.');
+          throw new Error('No entry found for "' + term + '" \u67E5\u7121\u6B64\u5B57\u3002Check the spelling, or add it manually.');
         }
-        throw new Error('The dictionary service returned an error. Try again. 字典服務發生錯誤，請重試。');
+        throw new Error('The dictionary service returned an error. Try again. \u5B57\u5178\u670D\u52D9\u767C\u751F\u932F\u8AA4\uFF0C\u8ACB\u91CD\u8A66\u3002');
       }
-      const data = await res.json();
-
-      const collected = [];
-      data.forEach((entry) => {
-        const ipa =
-          entry.phonetic ||
-          ((entry.phonetics || []).find((p) => p.text) || {}).text ||
-          '';
-        (entry.meanings || []).forEach((m) => {
-          (m.definitions || []).forEach((d) => {
+      return res.json();
+    })
+    .then(function (data) {
+      var collected = [];
+      data.forEach(function (entry) {
+        var ipa = entry.phonetic || '';
+        if (!ipa && entry.phonetics) {
+          for (var i = 0; i < entry.phonetics.length; i++) {
+            if (entry.phonetics[i].text) { ipa = entry.phonetics[i].text; break; }
+          }
+        }
+        (entry.meanings || []).forEach(function (m) {
+          (m.definitions || []).forEach(function (d) {
             collected.push({
               word: entry.word,
               pos: m.partOfSpeech || 'noun',
-              ipa,
+              ipa: ipa,
               meaning: d.definition,
-              example: d.example || '',
+              example: d.example || ''
             });
           });
         });
       });
-
       if (collected.length === 0) {
-        throw new Error('No definitions found for "' + term + '". Add it manually. 查無釋義，請手動新增。');
+        throw new Error('No definitions found for "' + term + '". Add it manually. \u67E5\u7121\u91CB\u7FA9\uFF0C\u8ACB\u624B\u52D5\u65B0\u589E\u3002');
       }
-      collected.sort((a, b) => (b.example ? 1 : 0) - (a.example ? 1 : 0));
-      setSenses(collected.slice(0, 8));
-    } catch (err) {
+      collected.sort(function (a, b) { return (b.example ? 1 : 0) - (a.example ? 1 : 0); });
+      state.senses = collected.slice(0, 8);
+    })
+    .catch(function (err) {
       if (err instanceof TypeError) {
-        setSearchError(
-          'Could not reach the dictionary service. Check your internet connection, or add the word manually. 無法連線至字典服務，請檢查網路連線或手動新增。'
-        );
+        state.searchError = 'Could not reach the dictionary service. Check your internet connection, or add the word manually. \u7121\u6CD5\u9023\u7DDA\u81F3\u5B57\u5178\u670D\u52D9\uFF0C\u8ACB\u6AA2\u67E5\u7DB2\u8DEF\u9023\u7DDA\u6216\u624B\u52D5\u65B0\u589E\u3002';
       } else {
-        setSearchError(err.message);
+        state.searchError = err.message;
       }
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  const saveSense = (sense) => {
-    const newWord = {
-      id: Date.now(),
-      word: sense.word.toLowerCase(),
-      pos: sense.pos,
-      ipa: sense.ipa,
-      meaning: sense.meaning,
-      example: sense.example || '',
-    };
-    if (!newWord.example) {
-      setForm({
-        word: newWord.word,
-        pos: POS_OPTIONS.includes(newWord.pos) ? newWord.pos : 'noun',
-        ipa: newWord.ipa,
-        meaning: newWord.meaning,
-        example: '',
-      });
-      setShowForm(true);
-      setSenses(null);
-      setSearchTerm('');
-      setFormError('This sense has no example sentence — write one so it can be used in the cloze test. 此釋義沒有例句，請自行填寫一句，以便用於填空測驗。');
-      return;
-    }
-    setWords((w) => [newWord, ...w]);
-    setSenses(null);
-    setSearchTerm('');
-    setSavedFlash('"' + newWord.word + '" added 已新增');
-    setCardIndex(0);
-    setTimeout(() => setSavedFlash(''), 2500);
-  };
-
-  const addWord = () => {
-    if (!form.word.trim() || !form.meaning.trim() || !form.example.trim()) {
-      setFormError('Fill in the word, meaning and example sentence. 請填寫單字、釋義與例句。');
-      return;
-    }
-    const newWord = {
-      id: Date.now(),
-      word: form.word.trim().toLowerCase(),
-      pos: form.pos,
-      ipa: form.ipa.trim(),
-      meaning: form.meaning.trim(),
-      example: form.example.trim(),
-    };
-    setWords((w) => [newWord, ...w]);
-    setForm({ word: '', pos: 'noun', ipa: '', meaning: '', example: '' });
-    setFormError('');
-    setShowForm(false);
-    setCardIndex(0);
-    setSavedFlash('"' + newWord.word + '" added 已新增');
-    setTimeout(() => setSavedFlash(''), 2500);
-  };
-
-  const deleteWord = (id) => {
-    setWords((w) => w.filter((x) => x.id !== id));
-    setCardIndex(0);
-    setFlipped(false);
-  };
-
-  const speak = (text) => {
-    try {
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'en-GB';
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(u);
-    } catch (e) { /* speech not available */ }
-  };
-
-  const startQuiz = () => {
-    const pool = shuffle(words.filter((w) => w.example));
-    const numQuestions = Math.min(10, pool.length);
-    const questions = pool.slice(0, numQuestions).map((target) => {
-      const distractors = shuffle(words.filter((w) => w.id !== target.id))
-        .slice(0, 3)
-        .map((w) => w.word);
-      return {
-        target,
-        cloze: makeCloze(target.example, target.word),
-        choices: shuffle([target.word, ...distractors]),
-      };
+    })
+    .finally(function () {
+      state.searching = false;
+      render();
     });
-    setQuiz({ questions, current: 0, score: 0, selected: null, finished: false });
-  };
-
-  const answerQuiz = (choice) => {
-    if (quiz.selected !== null) return;
-    const correct = choice === quiz.questions[quiz.current].target.word;
-    setQuiz((q) => ({ ...q, selected: choice, score: correct ? q.score + 1 : q.score }));
-  };
-
-  const nextQuestion = () => {
-    setQuiz((q) => {
-      if (q.current + 1 >= q.questions.length) return { ...q, finished: true };
-      return { ...q, current: q.current + 1, selected: null };
-    });
-  };
-
-  const currentCard = words[cardIndex];
-
-  const tabs = [
-    { key: 'bank', label: '字庫', sub: 'Word Bank' },
-    { key: 'cards', label: '字卡', sub: 'Flashcards' },
-    { key: 'quiz', label: '測驗', sub: 'Cloze Test' },
-  ];
-
-  const inputClass =
-    'w-full border-2 border-black px-3 py-3 text-sm bg-white focus:outline-none focus:bg-neutral-100 placeholder-neutral-400';
-
-  return (
-    <div className="min-h-screen bg-white text-black">
-      <div className="max-w-3xl mx-auto px-4 pb-16">
-
-        {/* ===== Masthead ===== */}
-        <header className="pt-10 pb-6 border-b-8 border-black">
-          <p className="text-xs uppercase tracking-widest text-neutral-500 mb-2">
-            詞彙 · Vocabulary · 單字
-          </p>
-          <h1 className="text-5xl sm:text-6xl font-bold tracking-tight leading-none">
-            Word<span className="text-red-600">.</span>bank
-          </h1>
-          <div className="flex justify-between items-end mt-4">
-            <p className="text-xs uppercase tracking-widest">
-              查詢 Lookup — 字卡 Flashcards — 填空 Cloze
-            </p>
-            <p className="text-xs uppercase tracking-widest text-neutral-500">
-              N° {String(words.length).padStart(3, '0')}
-            </p>
-          </div>
-        </header>
-
-        {/* ===== Tabs ===== */}
-        <nav className="grid grid-cols-3 border-b-2 border-black">
-          {tabs.map(({ key, label, sub }) => (
-            <button
-              key={key}
-              onClick={() => { setTab(key); setFlipped(false); }}
-              className={'py-4 px-2 text-left border-r-2 last:border-r-0 border-black transition-colors ' + (
-                tab === key ? 'bg-black text-white' : 'bg-white text-black hover:bg-neutral-100'
-              )}
-            >
-              <span className="block text-base font-bold leading-tight">{label}</span>
-              <span className={'block text-xs uppercase tracking-widest ' + (tab === key ? 'text-neutral-400' : 'text-neutral-500')}>
-                {sub}
-              </span>
-            </button>
-          ))}
-        </nav>
-
-        {/* ================= WORD BANK ================= */}
-        {tab === 'bank' && (
-          <div>
-            {/* ---- Lookup ---- */}
-            <section className="py-8 border-b-2 border-black">
-              <p className="text-xs uppercase tracking-widest mb-3">
-                01 — Look up a word 查詢單字
-              </p>
-              <div className="flex">
-                <input
-                  className="flex-1 min-w-0 border-2 border-black border-r-0 px-3 py-3 text-lg font-bold bg-white focus:outline-none focus:bg-neutral-100 placeholder-neutral-300"
-                  placeholder="serendipity"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && !searching && lookupWord()}
-                />
-                <button
-                  onClick={lookupWord}
-                  disabled={searching || !searchTerm.trim()}
-                  className="flex items-center gap-2 bg-red-600 hover:bg-red-700 disabled:bg-neutral-300 text-white text-xs font-bold uppercase tracking-widest px-6 transition-colors"
-                >
-                  {searching ? <LoaderIcon size={16} /> : <SearchIcon size={16} />}
-                  <span className="hidden sm:inline">查詢</span>
-                </button>
-              </div>
-
-              {searchError && (
-                <p className="mt-4 text-sm border-l-4 border-red-600 pl-3 text-neutral-700 fade-in">
-                  {searchError}
-                </p>
-              )}
-
-              {savedFlash && (
-                <p className="mt-4 text-xs uppercase tracking-widest text-red-600 font-bold fade-in">
-                  {savedFlash}
-                </p>
-              )}
-
-              {/* ---- Sense picker ---- */}
-              {senses && (
-                <div className="fade-in">
-                  <p className="text-xs uppercase tracking-widest text-neutral-500 mt-6 mb-3">
-                    {senses.length} sense{senses.length > 1 ? 's' : ''} — select one to save 選擇一項釋義儲存
-                  </p>
-                  <div className="border-t-2 border-black max-h-80 overflow-y-auto">
-                    {senses.map((s, i) => (
-                      <button
-                        key={i}
-                        onClick={() => saveSense(s)}
-                        className="w-full text-left border-b border-neutral-300 py-4 px-1 hover:bg-neutral-100 transition-colors"
-                      >
-                        <div className="flex items-baseline gap-3 flex-wrap mb-1">
-                          <span className="text-xs font-bold text-red-600">{String(i + 1).padStart(2, '0')}</span>
-                          <span className="font-bold">{s.word}</span>
-                          <span className="text-xs uppercase tracking-widest text-neutral-500">{s.pos}</span>
-                          {s.ipa && <span className="text-xs text-neutral-400">{s.ipa}</span>}
-                          {!s.example && (
-                            <span className="text-xs uppercase tracking-widest text-red-600">no example 無例句</span>
-                          )}
-                        </div>
-                        <p className="text-sm text-neutral-800 pl-7">{s.meaning}</p>
-                        {s.example && (
-                          <p className="text-sm text-neutral-500 pl-7 mt-1">「{s.example}」</p>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    onClick={() => setSenses(null)}
-                    className="text-xs uppercase tracking-widest text-neutral-500 hover:text-black mt-3"
-                  >
-                    Cancel 取消 ×
-                  </button>
-                </div>
-              )}
-            </section>
-
-            {/* ---- Manual entry ---- */}
-            <section className="py-6 border-b-2 border-black">
-              <button
-                onClick={() => setShowForm((s) => !s)}
-                className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest hover:text-red-600 transition-colors"
-              >
-                <PlusIcon size={14} className={'transition-transform ' + (showForm ? 'rotate-45' : '')} />
-                {showForm ? 'Close manual entry 關閉手動新增' : 'Add manually 手動新增'}
-              </button>
-
-              {showForm && (
-                <div className="mt-6 space-y-3 fade-in">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <input
-                      className={inputClass}
-                      placeholder="Word 單字"
-                      value={form.word}
-                      onChange={(e) => setForm({ ...form, word: e.target.value })}
-                    />
-                    <select
-                      className={inputClass + ' appearance-none'}
-                      value={form.pos}
-                      onChange={(e) => setForm({ ...form, pos: e.target.value })}
-                    >
-                      {POS_OPTIONS.map((p) => <option key={p}>{p}</option>)}
-                    </select>
-                  </div>
-                  <input
-                    className={inputClass}
-                    placeholder="Pronunciation / IPA 音標（選填）"
-                    value={form.ipa}
-                    onChange={(e) => setForm({ ...form, ipa: e.target.value })}
-                  />
-                  <textarea
-                    className={inputClass}
-                    rows={2}
-                    placeholder="Meaning / definition 釋義"
-                    value={form.meaning}
-                    onChange={(e) => setForm({ ...form, meaning: e.target.value })}
-                  />
-                  <textarea
-                    className={inputClass}
-                    rows={2}
-                    placeholder="Example sentence containing the word 含此單字的例句"
-                    value={form.example}
-                    onChange={(e) => setForm({ ...form, example: e.target.value })}
-                  />
-                  {formError && (
-                    <p className="text-sm border-l-4 border-red-600 pl-3 text-neutral-700">{formError}</p>
-                  )}
-                  <button
-                    onClick={addWord}
-                    className="w-full bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest py-4 transition-colors"
-                  >
-                    Save entry 儲存
-                  </button>
-                </div>
-              )}
-            </section>
-
-            {/* ---- Entry list ---- */}
-            <section className="pt-6">
-              <p className="text-xs uppercase tracking-widest text-neutral-500 mb-2">
-                02 — Entries 詞條 ({words.length})
-              </p>
-              {words.map((w, idx) => (
-                <div
-                  key={w.id}
-                  className="border-b border-neutral-300 py-5 grid grid-cols-12 gap-3 fade-in"
-                >
-                  <div className="col-span-2 sm:col-span-1">
-                    <span className="text-xs font-bold text-red-600">
-                      {String(words.length - idx).padStart(2, '0')}
-                    </span>
-                  </div>
-                  <div className="col-span-9 sm:col-span-10">
-                    <div className="flex items-baseline gap-3 flex-wrap">
-                      <span className="text-xl font-bold tracking-tight">{w.word}</span>
-                      <span className="text-xs uppercase tracking-widest text-neutral-500">{w.pos}</span>
-                      {w.ipa && <span className="text-xs text-neutral-400">{w.ipa}</span>}
-                      <button
-                        onClick={() => speak(w.word)}
-                        className="text-neutral-400 hover:text-red-600 transition-colors"
-                        title="Listen 發音"
-                      >
-                        <VolumeIcon size={14} />
-                      </button>
-                    </div>
-                    <p className="text-sm text-neutral-800 mt-1">{w.meaning}</p>
-                    {w.example && (
-                      <p className="text-sm text-neutral-500 mt-1">「{w.example}」</p>
-                    )}
-                  </div>
-                  <div className="col-span-1 flex justify-end">
-                    <button
-                      onClick={() => deleteWord(w.id)}
-                      className="text-neutral-300 hover:text-red-600 transition-colors"
-                      title="Delete 刪除"
-                    >
-                      <TrashIcon size={16} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {words.length === 0 && (
-                <p className="text-sm text-neutral-400 py-10">
-                  Empty. Look up your first word above. 字庫是空的，請先查詢你的第一個單字。
-                </p>
-              )}
-            </section>
-          </div>
-        )}
-
-        {/* ================= FLASHCARDS ================= */}
-        {tab === 'cards' && (
-          <div className="pt-8">
-            {words.length === 0 ? (
-              <p className="text-sm text-neutral-400 py-10">Add some words first. 請先新增單字。</p>
-            ) : (
-              <React.Fragment>
-                <div className="flex justify-between items-baseline mb-4">
-                  <p className="text-xs uppercase tracking-widest">
-                    字卡 {String(cardIndex + 1).padStart(2, '0')} / {String(words.length).padStart(2, '0')}
-                  </p>
-                  <p className="text-xs uppercase tracking-widest text-neutral-500">
-                    Tap to flip 點擊翻面
-                  </p>
-                </div>
-
-                <div className="w-full h-80 cursor-pointer card3d" onClick={() => setFlipped((f) => !f)}>
-                  <div className={'card-inner ' + (flipped ? 'flipped' : '')}>
-                    {/* Front */}
-                    <div className="card-face bg-black text-white flex flex-col justify-between p-8">
-                      <div className="flex justify-between items-start">
-                        <span className="text-xs uppercase tracking-widest text-neutral-400">{currentCard.pos}</span>
-                        <span className="w-4 h-4 bg-red-600 block"></span>
-                      </div>
-                      <div>
-                        <span className="text-4xl sm:text-5xl font-bold tracking-tight break-words">
-                          {currentCard.word}
-                        </span>
-                        <div className="flex items-center gap-3 mt-3">
-                          <span className="text-neutral-400 text-sm">{currentCard.ipa}</span>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); speak(currentCard.word); }}
-                            className="text-neutral-400 hover:text-white transition-colors"
-                          >
-                            <VolumeIcon size={18} />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                    {/* Back */}
-                    <div className="card-face card-back bg-white border-4 border-black flex flex-col justify-between p-8">
-                      <div>
-                        <p className="text-xs uppercase tracking-widest text-red-600 mb-2">釋義 — Meaning</p>
-                        <p className="text-lg font-bold leading-snug">{currentCard.meaning}</p>
-                      </div>
-                      {currentCard.example && (
-                        <div>
-                          <p className="text-xs uppercase tracking-widest text-neutral-500 mb-2">例句 — Example</p>
-                          <p className="text-sm text-neutral-700">「{currentCard.example}」</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 border-2 border-black mt-6">
-                  <button
-                    onClick={() => { setFlipped(false); setCardIndex((i) => (i - 1 + words.length) % words.length); }}
-                    className="flex items-center justify-center py-4 border-r-2 border-black hover:bg-neutral-100 transition-colors"
-                  >
-                    <ChevronLeftIcon size={18} />
-                  </button>
-                  <button
-                    onClick={() => setFlipped((f) => !f)}
-                    className="py-4 text-xs font-bold uppercase tracking-widest bg-black text-white hover:bg-red-600 transition-colors"
-                  >
-                    Flip 翻面
-                  </button>
-                  <button
-                    onClick={() => { setFlipped(false); setCardIndex((i) => (i + 1) % words.length); }}
-                    className="flex items-center justify-center py-4 border-l-2 border-black hover:bg-neutral-100 transition-colors"
-                  >
-                    <ChevronRightIcon size={18} />
-                  </button>
-                </div>
-              </React.Fragment>
-            )}
-          </div>
-        )}
-
-        {/* ================= CLOZE TEST ================= */}
-        {tab === 'quiz' && (
-          <div className="pt-8">
-            {words.filter((w) => w.example).length < 4 ? (
-              <p className="text-sm text-neutral-400 py-10">
-                You need at least 4 words with example sentences to generate a test. 至少需要 4 個含例句的單字才能產生測驗。
-              </p>
-            ) : !quiz ? (
-              <div className="border-4 border-black p-8">
-                <p className="text-xs uppercase tracking-widest text-red-600 mb-3">Cloze recall 填空測驗</p>
-                <h2 className="text-3xl font-bold tracking-tight leading-tight mb-4">
-                  The word is removed.<br />You put it back.
-                </h2>
-                <p className="text-sm text-neutral-600 mb-8 max-w-md">
-                  Each target word is blanked out of its example sentence.
-                  Choose the correct word from four options.
-                  例句中的目標單字已被挖空，請從四個選項中選出正確的字。
-                </p>
-                <button
-                  onClick={startQuiz}
-                  className="flex items-center gap-3 bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest px-8 py-4 transition-colors"
-                >
-                  Start 開始 — {Math.min(10, words.filter((w) => w.example).length)} questions
-                  <ArrowRightIcon size={14} />
-                </button>
-              </div>
-            ) : quiz.finished ? (
-              <div className="border-4 border-black p-8 fade-in">
-                <p className="text-xs uppercase tracking-widest text-red-600 mb-3">結果 — Result</p>
-                <p className="text-6xl sm:text-7xl font-bold tracking-tight">
-                  {quiz.score}<span className="text-neutral-300">/{quiz.questions.length}</span>
-                </p>
-                <p className="text-sm text-neutral-600 mt-4 mb-8 max-w-md">
-                  {quiz.score === quiz.questions.length
-                    ? 'Perfect score. Outstanding recall. 滿分，記憶力驚人。'
-                    : quiz.score >= quiz.questions.length * 0.7
-                    ? 'Good. Review the missed words in the flashcards. 不錯，用字卡複習答錯的單字吧。'
-                    : 'Keep practising with the flashcards, then try again. 用字卡多加練習後再試一次。'}
-                </p>
-                <button
-                  onClick={startQuiz}
-                  className="flex items-center gap-3 bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest px-8 py-4 transition-colors"
-                >
-                  <RotateCcwIcon size={14} /> Retake 再測一次
-                </button>
-              </div>
-            ) : (
-              (() => {
-                const q = quiz.questions[quiz.current];
-                return (
-                  <div>
-                    <div className="flex justify-between items-baseline mb-2">
-                      <p className="text-xs uppercase tracking-widest">
-                        題目 {String(quiz.current + 1).padStart(2, '0')} / {String(quiz.questions.length).padStart(2, '0')}
-                      </p>
-                      <p className="text-xs uppercase tracking-widest text-neutral-500">
-                        Score 得分 {quiz.score}
-                      </p>
-                    </div>
-
-                    {/* Progress bar */}
-                    <div className="w-full h-1 bg-neutral-200 mb-8">
-                      <div
-                        className="h-1 bg-red-600 transition-all duration-300"
-                        style={{ width: ((quiz.current / quiz.questions.length) * 100) + '%' }}
-                      />
-                    </div>
-
-                    <p className="text-xs uppercase tracking-widest text-red-600 mb-3">Fill the gap 填空</p>
-                    <p className="text-xl sm:text-2xl font-bold tracking-tight leading-snug mb-3">
-                      「{q.cloze}」
-                    </p>
-                    <p className="text-xs text-neutral-500 mb-8">
-                      {q.target.pos} — {q.target.meaning}
-                    </p>
-
-                    <div className="border-t-2 border-black">
-                      {q.choices.map((choice, ci) => {
-                        const isCorrect = choice === q.target.word;
-                        const isSelected = quiz.selected === choice;
-                        let style = 'hover:bg-neutral-100';
-                        if (quiz.selected !== null) {
-                          if (isCorrect) style = 'bg-black text-white';
-                          else if (isSelected) style = 'bg-red-600 text-white';
-                          else style = 'text-neutral-300';
-                        }
-                        return (
-                          <button
-                            key={choice}
-                            onClick={() => answerQuiz(choice)}
-                            disabled={quiz.selected !== null}
-                            className={'w-full flex items-baseline gap-4 text-left border-b-2 border-black px-2 py-4 font-bold transition-colors ' + style}
-                          >
-                            <span className="text-xs">{['A', 'B', 'C', 'D'][ci]}</span>
-                            <span className="text-lg">{choice}</span>
-                            {quiz.selected !== null && isCorrect && (
-                              <span className="ml-auto text-xs uppercase tracking-widest">正確 ✓</span>
-                            )}
-                            {quiz.selected !== null && isSelected && !isCorrect && (
-                              <span className="ml-auto text-xs uppercase tracking-widest">錯誤 ×</span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {quiz.selected !== null && (
-                      <div className="mt-6 fade-in">
-                        <p className="text-sm text-neutral-600 border-l-4 border-black pl-3 mb-6">
-                          「{q.target.example}」
-                        </p>
-                        <button
-                          onClick={nextQuestion}
-                          className="w-full flex items-center justify-center gap-3 bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest py-4 transition-colors"
-                        >
-                          {quiz.current + 1 >= quiz.questions.length ? 'See result 看結果' : 'Next 下一題'}
-                          <ArrowRightIcon size={14} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()
-            )}
-          </div>
-        )}
-
-        {/* ===== Footer ===== */}
-        <footer className="mt-16 pt-4 border-t-2 border-black flex justify-between">
-          <p className="text-xs uppercase tracking-widest text-neutral-500">Word.bank 字庫</p>
-          <p className="text-xs uppercase tracking-widest text-neutral-500">2026</p>
-        </footer>
-      </div>
-    </div>
-  );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<VocabBankApp />);
+// ---------- Actions ----------
+function saveSense(i) {
+  var s = state.senses[i];
+  if (!s) return;
+  if (!s.example) {
+    state.form = {
+      word: s.word.toLowerCase(),
+      pos: POS_OPTIONS.indexOf(s.pos) !== -1 ? s.pos : 'noun',
+      ipa: s.ipa,
+      meaning: s.meaning,
+      example: ''
+    };
+    state.showForm = true;
+    state.senses = null;
+    state.searchTerm = '';
+    state.formError = 'This sense has no example sentence \u2014 write one so it can be used in the cloze test. \u6B64\u91CB\u7FA9\u6C92\u6709\u4F8B\u53E5\uFF0C\u8ACB\u81EA\u884C\u586B\u5BEB\u4E00\u53E5\uFF0C\u4EE5\u4FBF\u7528\u65BC\u586B\u7A7A\u6E2C\u9A57\u3002';
+    render();
+    return;
+  }
+  state.words.unshift({
+    id: Date.now(),
+    word: s.word.toLowerCase(),
+    pos: s.pos,
+    ipa: s.ipa,
+    meaning: s.meaning,
+    example: s.example
+  });
+  saveWords();
+  state.senses = null;
+  state.searchTerm = '';
+  state.cardIndex = 0;
+  setFlash('"' + s.word.toLowerCase() + '" added \u5DF2\u65B0\u589E');
+  render();
+}
+
+function addWord() {
+  var f = state.form;
+  if (!f.word.trim() || !f.meaning.trim() || !f.example.trim()) {
+    state.formError = 'Fill in the word, meaning and example sentence. \u8ACB\u586B\u5BEB\u55AE\u5B57\u3001\u91CB\u7FA9\u8207\u4F8B\u53E5\u3002';
+    render();
+    return;
+  }
+  state.words.unshift({
+    id: Date.now(),
+    word: f.word.trim().toLowerCase(),
+    pos: f.pos,
+    ipa: f.ipa.trim(),
+    meaning: f.meaning.trim(),
+    example: f.example.trim()
+  });
+  saveWords();
+  setFlash('"' + f.word.trim().toLowerCase() + '" added \u5DF2\u65B0\u589E');
+  state.form = { word: '', pos: 'noun', ipa: '', meaning: '', example: '' };
+  state.formError = '';
+  state.showForm = false;
+  state.cardIndex = 0;
+  render();
+}
+
+function deleteWord(id) {
+  state.words = state.words.filter(function (w) { return w.id !== id; });
+  saveWords();
+  state.cardIndex = 0;
+  state.flipped = false;
+  render();
+}
+
+function startQuiz() {
+  var pool = shuffle(state.words.filter(function (w) { return w.example; }));
+  var num = Math.min(10, pool.length);
+  var questions = pool.slice(0, num).map(function (target) {
+    var distractors = shuffle(state.words.filter(function (w) { return w.id !== target.id; }))
+      .slice(0, 3)
+      .map(function (w) { return w.word; });
+    return {
+      target: target,
+      cloze: makeCloze(target.example, target.word),
+      choices: shuffle([target.word].concat(distractors))
+    };
+  });
+  state.quiz = { questions: questions, current: 0, score: 0, selected: null, finished: false };
+  render();
+}
+
+function answerQuiz(choice) {
+  var q = state.quiz;
+  if (!q || q.selected !== null) return;
+  q.selected = choice;
+  if (choice === q.questions[q.current].target.word) q.score++;
+  render();
+}
+
+function nextQuestion() {
+  var q = state.quiz;
+  if (q.current + 1 >= q.questions.length) {
+    q.finished = true;
+  } else {
+    q.current++;
+    q.selected = null;
+  }
+  render();
+}
+
+// ---------- Event delegation ----------
+document.addEventListener('click', function (e) {
+  var el = e.target.closest('[data-action]');
+  if (!el) return;
+  var action = el.getAttribute('data-action');
+
+  if (action === 'tab') {
+    state.tab = el.getAttribute('data-tab');
+    state.flipped = false;
+    render();
+  } else if (action === 'lookup') {
+    doLookup();
+  } else if (action === 'save-sense') {
+    saveSense(parseInt(el.getAttribute('data-i'), 10));
+  } else if (action === 'cancel-senses') {
+    state.senses = null;
+    render();
+  } else if (action === 'toggle-form') {
+    state.showForm = !state.showForm;
+    state.formError = '';
+    render();
+  } else if (action === 'add-word') {
+    addWord();
+  } else if (action === 'delete') {
+    deleteWord(parseInt(el.getAttribute('data-id'), 10));
+  } else if (action === 'speak') {
+    speak(el.getAttribute('data-word'));
+  } else if (action === 'flip') {
+    state.flipped = !state.flipped;
+    var inner = document.getElementById('cardInner');
+    if (inner) inner.classList.toggle('flipped', state.flipped);
+  } else if (action === 'prev-card') {
+    state.flipped = false;
+    state.cardIndex = (state.cardIndex - 1 + state.words.length) % state.words.length;
+    render();
+  } else if (action === 'next-card') {
+    state.flipped = false;
+    state.cardIndex = (state.cardIndex + 1) % state.words.length;
+    render();
+  } else if (action === 'start-quiz') {
+    startQuiz();
+  } else if (action === 'answer') {
+    answerQuiz(el.getAttribute('data-choice'));
+  } else if (action === 'next-q') {
+    nextQuestion();
+  }
+});
+
+// Keep typed values in state so re-renders never lose them
+document.addEventListener('input', function (e) {
+  if (e.target.id === 'searchInput') state.searchTerm = e.target.value;
+  var field = e.target.getAttribute && e.target.getAttribute('data-form');
+  if (field) state.form[field] = e.target.value;
+});
+
+// Enter key triggers lookup
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Enter' && e.target.id === 'searchInput') doLookup();
+});
+
+// ---------- Go ----------
+render();
 </script>
 </body>
 </html>
