@@ -75,6 +75,7 @@ var IC = {
   search: function (s, c) { return icon('<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>', s, c); },
   plus: function (s, c) { return icon('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>', s, c); },
   trash: function (s, c) { return icon('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>', s, c); },
+  pencil: function (s, c) { return icon('<path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>', s, c); },
   left: function (s, c) { return icon('<polyline points="15 18 9 12 15 6"/>', s, c); },
   right: function (s, c) { return icon('<polyline points="9 18 15 12 9 6"/>', s, c); },
   arrow: function (s, c) { return icon('<line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>', s, c); },
@@ -130,6 +131,9 @@ var state = {
   showForm: false,
   form: { word: '', pos: 'noun', ipa: '', meaning: '', example: '' },
   formError: '',
+  editingId: null,
+  editForm: { word: '', pos: 'noun', ipa: '', meaning: '', example: '' },
+  editError: '',
   cardIndex: 0,
   flipped: false,
   quiz: null
@@ -201,6 +205,7 @@ auth.onAuthStateChanged(function (u) {
     state.tab = 'bank';
     state.quiz = null;
     state.senses = null;
+    state.editingId = null;
   }
   render();
 });
@@ -400,13 +405,18 @@ function bankHTML() {
       '</button>';
     });
     html += '</div>' +
+      // None of the senses fits: open the manual form pre-filled with the word + IPA
+      '<button data-action="manual-from-search" class="w-full flex items-center gap-2 border-2 border-black border-t-0 px-3 py-4 text-xs font-bold uppercase tracking-widest hover:bg-black hover:text-white transition-colors">' +
+        '<span class="pointer-events-none">' + IC.plus(14) + '</span>' +
+        '<span class="pointer-events-none">None of these fits? Add \u201C' + esc(state.senses.length ? state.senses[0].word : state.searchTerm) + '\u201D manually \u6C92\u6709\u5408\u9069\u7684\u91CB\u7FA9\uFF1F\u624B\u52D5\u65B0\u589E</span>' +
+      '</button>' +
       '<button data-action="cancel-senses" class="text-xs uppercase tracking-widest text-neutral-500 hover:text-black mt-3">Cancel \u53D6\u6D88 \u00D7</button>' +
     '</div>';
   }
   html += '</section>';
 
   // Manual entry
-  html += '<section class="py-6 border-b-2 border-black">' +
+  html += '<section id="manualSection" class="py-6 border-b-2 border-black">' +
     '<button data-action="toggle-form" class="flex items-center gap-2 text-xs font-bold uppercase tracking-widest hover:text-red-600 transition-colors">' +
       '<span class="pointer-events-none ' + (state.showForm ? 'rotate-45 inline-block' : 'inline-block') + '">' + IC.plus(14) + '</span>' +
       '<span class="pointer-events-none">' + (state.showForm ? 'Close manual entry \u95DC\u9589\u624B\u52D5\u65B0\u589E' : 'Add manually \u624B\u52D5\u65B0\u589E') + '</span>' +
@@ -437,9 +447,34 @@ function bankHTML() {
     html += '<p class="text-sm text-neutral-400 py-10">Empty. Look up your first word above. \u5B57\u5EAB\u662F\u7A7A\u7684\uFF0C\u8ACB\u5148\u67E5\u8A62\u4F60\u7684\u7B2C\u4E00\u500B\u55AE\u5B57\u3002</p>';
   } else {
     state.words.forEach(function (w, idx) {
+
+      // --- Inline edit mode for this entry ---
+      if (state.editingId === w.id) {
+        var editPosOpts = POS_OPTIONS.map(function (p) {
+          return '<option' + (state.editForm.pos === p ? ' selected' : '') + '>' + p + '</option>';
+        }).join('');
+        html += '<div class="border-2 border-black my-3 p-4 space-y-3 fade-in bg-neutral-50">' +
+          '<p class="text-xs uppercase tracking-widest text-red-600">Editing \u7DE8\u8F2F\u4E2D \u2014 ' + esc(w.word) + '</p>' +
+          '<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">' +
+            '<input data-editform="word" class="' + INPUT_CLASS + '" placeholder="Word \u55AE\u5B57" value="' + esc(state.editForm.word) + '">' +
+            '<select data-editform="pos" class="' + INPUT_CLASS + ' appearance-none">' + editPosOpts + '</select>' +
+          '</div>' +
+          '<input data-editform="ipa" class="' + INPUT_CLASS + '" placeholder="Pronunciation / IPA \u97F3\u6A19\uFF08\u9078\u586B\uFF09" value="' + esc(state.editForm.ipa) + '">' +
+          '<textarea data-editform="meaning" rows="2" class="' + INPUT_CLASS + '" placeholder="Meaning / definition \u91CB\u7FA9">' + esc(state.editForm.meaning) + '</textarea>' +
+          '<textarea data-editform="example" rows="2" class="' + INPUT_CLASS + '" placeholder="Example sentence containing the word \u542B\u6B64\u55AE\u5B57\u7684\u4F8B\u53E5">' + esc(state.editForm.example) + '</textarea>' +
+          (state.editError ? '<p class="text-sm border-l-4 border-red-600 pl-3 text-neutral-700">' + esc(state.editError) + '</p>' : '') +
+          '<div class="grid grid-cols-2 gap-3">' +
+            '<button data-action="save-edit" class="bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest py-4 transition-colors">Save changes \u5132\u5B58\u8B8A\u66F4</button>' +
+            '<button data-action="cancel-edit" class="border-2 border-black bg-white hover:bg-neutral-100 text-xs font-bold uppercase tracking-widest py-4 transition-colors">Cancel \u53D6\u6D88</button>' +
+          '</div>' +
+        '</div>';
+        return;
+      }
+
+      // --- Normal display mode ---
       html += '<div class="border-b border-neutral-300 py-5 grid grid-cols-12 gap-3 fade-in">' +
         '<div class="col-span-2 sm:col-span-1"><span class="text-xs font-bold text-red-600">' + pad2(state.words.length - idx) + '</span></div>' +
-        '<div class="col-span-9 sm:col-span-10">' +
+        '<div class="col-span-8 sm:col-span-9">' +
           '<div class="flex items-baseline gap-3 flex-wrap">' +
             '<span class="text-xl font-bold tracking-tight">' + esc(w.word) + '</span>' +
             '<span class="text-xs uppercase tracking-widest text-neutral-500">' + esc(w.pos) + '</span>' +
@@ -449,7 +484,8 @@ function bankHTML() {
           '<p class="text-sm text-neutral-800 mt-1">' + esc(w.meaning) + '</p>' +
           (w.example ? '<p class="text-sm text-neutral-500 mt-1">\u300C' + esc(w.example) + '\u300D</p>' : '') +
         '</div>' +
-        '<div class="col-span-1 flex justify-end">' +
+        '<div class="col-span-2 flex justify-end items-start gap-3">' +
+          '<button data-action="edit" data-id="' + esc(w.id) + '" title="Edit \u7DE8\u8F2F" class="text-neutral-300 hover:text-black transition-colors"><span class="pointer-events-none">' + IC.pencil(16) + '</span></button>' +
           '<button data-action="delete" data-id="' + esc(w.id) + '" title="Delete \u522A\u9664" class="text-neutral-300 hover:text-red-600 transition-colors"><span class="pointer-events-none">' + IC.trash(16) + '</span></button>' +
         '</div>' +
       '</div>';
@@ -643,7 +679,8 @@ function doLookup() {
         throw new Error('No definitions found for "' + term + '". Add it manually. \u67E5\u7121\u91CB\u7FA9\uFF0C\u8ACB\u624B\u52D5\u65B0\u589E\u3002');
       }
       collected.sort(function (a, b) { return (b.example ? 1 : 0) - (a.example ? 1 : 0); });
-      state.senses = collected.slice(0, 8);    })
+      state.senses = collected.slice(0, 8);
+    })
     .catch(function (err) {
       if (err instanceof TypeError) {
         state.searchError = 'Could not reach the dictionary service. Check your internet connection, or add the word manually. \u7121\u6CD5\u9023\u7DDA\u81F3\u5B57\u5178\u670D\u52D9\uFF0C\u8ACB\u6AA2\u67E5\u7DB2\u8DEF\u9023\u7DDA\u6216\u624B\u52D5\u65B0\u589E\u3002';
@@ -701,6 +738,27 @@ function saveSense(i) {
   render();
 }
 
+// "None of these fits" — open the manual form pre-filled with the
+// searched word and its IPA, so the user writes their own meaning/example.
+function manualFromSearch() {
+  var word = state.searchTerm.trim().toLowerCase();
+  var ipa = '';
+  var pos = 'noun';
+  if (state.senses && state.senses.length > 0) {
+    word = state.senses[0].word.toLowerCase();
+    ipa = state.senses[0].ipa || '';
+    if (POS_OPTIONS.indexOf(state.senses[0].pos) !== -1) pos = state.senses[0].pos;
+  }
+  state.form = { word: word, pos: pos, ipa: ipa, meaning: '', example: '' };
+  state.formError = '';
+  state.showForm = true;
+  state.senses = null;
+  state.searchTerm = '';
+  render();
+  var sec = document.getElementById('manualSection');
+  if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function addWord() {
   var f = state.form;
   if (!f.word.trim() || !f.meaning.trim() || !f.example.trim()) {
@@ -721,6 +779,55 @@ function addWord() {
   state.formError = '';
   state.showForm = false;
   state.cardIndex = 0;
+  render();
+}
+
+// ---------- Editing ----------
+function startEdit(id) {
+  var w = null;
+  for (var i = 0; i < state.words.length; i++) {
+    if (state.words[i].id === id) { w = state.words[i]; break; }
+  }
+  if (!w) return;
+  state.editingId = id;
+  state.editForm = {
+    word: w.word || '',
+    pos: POS_OPTIONS.indexOf(w.pos) !== -1 ? w.pos : 'noun',
+    ipa: w.ipa || '',
+    meaning: w.meaning || '',
+    example: w.example || ''
+  };
+  state.editError = '';
+  render();
+}
+
+function saveEdit() {
+  var f = state.editForm;
+  if (!f.word.trim() || !f.meaning.trim() || !f.example.trim()) {
+    state.editError = 'Fill in the word, meaning and example sentence. \u8ACB\u586B\u5BEB\u55AE\u5B57\u3001\u91CB\u7FA9\u8207\u4F8B\u53E5\u3002';
+    render();
+    return;
+  }
+  var savedWord = f.word.trim().toLowerCase();
+  wordsRef().doc(String(state.editingId)).update({
+    word: savedWord,
+    pos: f.pos,
+    ipa: f.ipa.trim(),
+    meaning: f.meaning.trim(),
+    example: f.example.trim()
+  }).catch(function (err) {
+    state.syncError = 'Could not save changes \u7121\u6CD5\u5132\u5B58\u8B8A\u66F4: ' + err.message;
+    render();
+  });
+  state.editingId = null;
+  state.editError = '';
+  setFlash('"' + savedWord + '" updated \u5DF2\u66F4\u65B0');
+  render();
+}
+
+function cancelEdit() {
+  state.editingId = null;
+  state.editError = '';
   render();
 }
 
@@ -787,6 +894,8 @@ document.addEventListener('click', function (e) {
     doLookup();
   } else if (action === 'save-sense') {
     saveSense(parseInt(el.getAttribute('data-i'), 10));
+  } else if (action === 'manual-from-search') {
+    manualFromSearch();
   } else if (action === 'cancel-senses') {
     state.senses = null;
     render();
@@ -796,6 +905,12 @@ document.addEventListener('click', function (e) {
     render();
   } else if (action === 'add-word') {
     addWord();
+  } else if (action === 'edit') {
+    startEdit(el.getAttribute('data-id'));
+  } else if (action === 'save-edit') {
+    saveEdit();
+  } else if (action === 'cancel-edit') {
+    cancelEdit();
   } else if (action === 'delete') {
     deleteWord(el.getAttribute('data-id'));
   } else if (action === 'speak') {
@@ -826,6 +941,8 @@ document.addEventListener('input', function (e) {
   if (e.target.id === 'searchInput') state.searchTerm = e.target.value;
   var field = e.target.getAttribute && e.target.getAttribute('data-form');
   if (field) state.form[field] = e.target.value;
+  var editField = e.target.getAttribute && e.target.getAttribute('data-editform');
+  if (editField) state.editForm[editField] = e.target.value;
 });
 
 // Enter key triggers lookup
