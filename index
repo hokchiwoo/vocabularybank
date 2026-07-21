@@ -1,0 +1,756 @@
+import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Plus, Trash2, ChevronLeft, ChevronRight, RotateCcw, Volume2,
+  Search, Loader2, ArrowRight
+} from 'lucide-react';
+
+// ---------- Preloaded dictionary-style entries ----------
+const SEED_WORDS = [
+  {
+    id: 1,
+    word: 'meticulous',
+    pos: 'adjective',
+    ipa: '/məˈtɪk.jə.ləs/',
+    meaning: 'very careful and with great attention to every detail',
+    example: 'Many hours of meticulous preparation have gone into writing the book.',
+  },
+  {
+    id: 2,
+    word: 'ubiquitous',
+    pos: 'adjective',
+    ipa: '/juːˈbɪk.wɪ.təs/',
+    meaning: 'seeming to be everywhere or in several places at the same time',
+    example: 'The mobile phone, that most ubiquitous of consumer-electronic appliances, is now used for far more than calls.',
+  },
+  {
+    id: 3,
+    word: 'resilient',
+    pos: 'adjective',
+    ipa: '/rɪˈzɪl.i.ənt/',
+    meaning: 'able to be happy or successful again after something difficult or bad has happened',
+    example: 'She is a resilient girl - she will not be unhappy for long.',
+  },
+  {
+    id: 4,
+    word: 'ephemeral',
+    pos: 'adjective',
+    ipa: '/ɪˈfem.ər.əl/',
+    meaning: 'lasting for only a short time',
+    example: 'Fame in the world of rock and pop is largely ephemeral.',
+  },
+  {
+    id: 5,
+    word: 'candid',
+    pos: 'adjective',
+    ipa: '/ˈkæn.dɪd/',
+    meaning: 'honest and telling the truth, especially about something difficult or painful',
+    example: 'To be candid with you, I think you are making a dreadful mistake.',
+  },
+  {
+    id: 6,
+    word: 'scrutinize',
+    pos: 'verb',
+    ipa: '/ˈskruː.tən.aɪz/',
+    meaning: 'to examine something very carefully in order to discover information',
+    example: 'He scrutinized the men\u2019s faces carefully, trying to work out who was lying.',
+  },
+];
+
+// ---------- Helpers ----------
+const shuffle = (arr) => {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+};
+
+const makeCloze = (sentence, word) => {
+  const stem = word.length > 4 ? word.slice(0, word.length - 1) : word;
+  const regex = new RegExp(`\\b${stem}\\w*\\b`, 'gi');
+  const blanked = sentence.replace(regex, '________');
+  return blanked.includes('________') ? blanked : sentence + ' ( ________ )';
+};
+
+const POS_OPTIONS = ['noun', 'verb', 'adjective', 'adverb', 'phrasal verb', 'idiom', 'preposition', 'interjection', 'pronoun', 'conjunction'];
+
+const HELVETICA = {
+  fontFamily: '"Helvetica Neue", Helvetica, Arial, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif',
+};
+
+export default function VocabBankApp() {
+  const [words, setWords] = useState(SEED_WORDS);
+  const [tab, setTab] = useState('bank');
+
+  // ---- Lookup state ----
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const [senses, setSenses] = useState(null);
+  const [savedFlash, setSavedFlash] = useState('');
+
+  // ---- Manual form state ----
+  const [form, setForm] = useState({ word: '', pos: 'noun', ipa: '', meaning: '', example: '' });
+  const [showForm, setShowForm] = useState(false);
+  const [formError, setFormError] = useState('');
+
+  // ---- Flashcard state ----
+  const [cardIndex, setCardIndex] = useState(0);
+  const [flipped, setFlipped] = useState(false);
+
+  // ---- Quiz state ----
+  const [quiz, setQuiz] = useState(null);
+
+  // ---------- Dictionary lookup ----------
+  const lookupWord = async () => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return;
+    setSearching(true);
+    setSearchError('');
+    setSenses(null);
+    setSavedFlash('');
+    try {
+      const res = await fetch(
+        `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(term)}`
+      );
+      if (!res.ok) {
+        if (res.status === 404) {
+          throw new Error(`No entry found for "${term}" 查無此字。Check the spelling, or add it manually.`);
+        }
+        throw new Error('The dictionary service returned an error. Try again. 字典服務發生錯誤，請重試。');
+      }
+      const data = await res.json();
+
+      const collected = [];
+      data.forEach((entry) => {
+        const ipa =
+          entry.phonetic ||
+          (entry.phonetics || []).find((p) => p.text)?.text ||
+          '';
+        (entry.meanings || []).forEach((m) => {
+          (m.definitions || []).forEach((d) => {
+            collected.push({
+              word: entry.word,
+              pos: m.partOfSpeech || 'noun',
+              ipa,
+              meaning: d.definition,
+              example: d.example || '',
+            });
+          });
+        });
+      });
+
+      if (collected.length === 0) {
+        throw new Error(`No definitions found for "${term}". Add it manually. 查無釋義，請手動新增。`);
+      }
+      collected.sort((a, b) => (b.example ? 1 : 0) - (a.example ? 1 : 0));
+      setSenses(collected.slice(0, 8));
+    } catch (err) {
+      if (err instanceof TypeError) {
+        setSearchError(
+          'Could not reach the dictionary service (it may be blocked in this preview environment). Add the word manually — lookup will work when the app runs on a normal website. 無法連線至字典服務（預覽環境可能封鎖了連線），請先手動新增。'
+        );
+      } else {
+        setSearchError(err.message);
+      }
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const saveSense = (sense) => {
+    const newWord = {
+      id: Date.now(),
+      word: sense.word.toLowerCase(),
+      pos: sense.pos,
+      ipa: sense.ipa,
+      meaning: sense.meaning,
+      example: sense.example || '',
+    };
+    if (!newWord.example) {
+      setForm({
+        word: newWord.word,
+        pos: POS_OPTIONS.includes(newWord.pos) ? newWord.pos : 'noun',
+        ipa: newWord.ipa,
+        meaning: newWord.meaning,
+        example: '',
+      });
+      setShowForm(true);
+      setSenses(null);
+      setSearchTerm('');
+      setFormError('This sense has no example sentence — write one so it can be used in the cloze test. 此釋義沒有例句，請自行填寫一句，以便用於填空測驗。');
+      return;
+    }
+    setWords((w) => [newWord, ...w]);
+    setSenses(null);
+    setSearchTerm('');
+    setSavedFlash(`"${newWord.word}" added 已新增`);
+    setCardIndex(0);
+    setTimeout(() => setSavedFlash(''), 2500);
+  };
+
+  const addWord = () => {
+    if (!form.word.trim() || !form.meaning.trim() || !form.example.trim()) {
+      setFormError('Fill in the word, meaning and example sentence. 請填寫單字、釋義與例句。');
+      return;
+    }
+    const newWord = {
+      id: Date.now(),
+      word: form.word.trim().toLowerCase(),
+      pos: form.pos,
+      ipa: form.ipa.trim(),
+      meaning: form.meaning.trim(),
+      example: form.example.trim(),
+    };
+    setWords((w) => [newWord, ...w]);
+    setForm({ word: '', pos: 'noun', ipa: '', meaning: '', example: '' });
+    setFormError('');
+    setShowForm(false);
+    setCardIndex(0);
+    setSavedFlash(`"${newWord.word}" added 已新增`);
+    setTimeout(() => setSavedFlash(''), 2500);
+  };
+
+  const deleteWord = (id) => {
+    setWords((w) => w.filter((x) => x.id !== id));
+    setCardIndex(0);
+    setFlipped(false);
+  };
+
+  const speak = (text) => {
+    try {
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'en-GB';
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(u);
+    } catch (e) { /* speech not available */ }
+  };
+
+  const startQuiz = () => {
+    const pool = shuffle(words.filter((w) => w.example));
+    const numQuestions = Math.min(10, pool.length);
+    const questions = pool.slice(0, numQuestions).map((target) => {
+      const distractors = shuffle(words.filter((w) => w.id !== target.id))
+        .slice(0, 3)
+        .map((w) => w.word);
+      return {
+        target,
+        cloze: makeCloze(target.example, target.word),
+        choices: shuffle([target.word, ...distractors]),
+      };
+    });
+    setQuiz({ questions, current: 0, score: 0, selected: null, finished: false });
+  };
+
+  const answerQuiz = (choice) => {
+    if (quiz.selected !== null) return;
+    const correct = choice === quiz.questions[quiz.current].target.word;
+    setQuiz((q) => ({ ...q, selected: choice, score: correct ? q.score + 1 : q.score }));
+  };
+
+  const nextQuestion = () => {
+    setQuiz((q) => {
+      if (q.current + 1 >= q.questions.length) return { ...q, finished: true };
+      return { ...q, current: q.current + 1, selected: null };
+    });
+  };
+
+  const currentCard = words[cardIndex];
+
+  const tabs = [
+    { key: 'bank', label: '字庫', sub: 'Word Bank' },
+    { key: 'cards', label: '字卡', sub: 'Flashcards' },
+    { key: 'quiz', label: '測驗', sub: 'Cloze Test' },
+  ];
+
+  const inputClass =
+    'w-full border-2 border-black px-3 py-3 text-sm bg-white focus:outline-none focus:bg-neutral-100 placeholder-neutral-400';
+
+  return (
+    <div className="min-h-screen bg-white text-black" style={HELVETICA}>
+      <div className="max-w-3xl mx-auto px-4 pb-16">
+
+        {/* ===== Masthead ===== */}
+        <header className="pt-10 pb-6 border-b-8 border-black">
+          <p className="text-xs uppercase tracking-widest text-neutral-500 mb-2">
+            詞彙 · Vocabulary · 單字
+          </p>
+          <h1 className="text-5xl sm:text-6xl font-bold tracking-tight leading-none">
+            Word<span className="text-red-600">.</span>bank
+          </h1>
+          <div className="flex justify-between items-end mt-4">
+            <p className="text-xs uppercase tracking-widest">
+              查詢 Lookup — 字卡 Flashcards — 填空 Cloze
+            </p>
+            <p className="text-xs uppercase tracking-widest text-neutral-500">
+              N° {String(words.length).padStart(3, '0')}
+            </p>
+          </div>
+        </header>
+
+        {/* ===== Tabs ===== */}
+        <nav className="grid grid-cols-3 border-b-2 border-black">
+          {tabs.map(({ key, label, sub }) => (
+            <button
+              key={key}
+              onClick={() => { setTab(key); setFlipped(false); }}
+              className={`py-4 px-2 text-left border-r-2 last:border-r-0 border-black transition-colors ${
+                tab === key ? 'bg-black text-white' : 'bg-white text-black hover:bg-neutral-100'
+              }`}
+            >
+              <span className="block text-base font-bold leading-tight">{label}</span>
+              <span className={`block text-xs uppercase tracking-widest ${tab === key ? 'text-neutral-400' : 'text-neutral-500'}`}>
+                {sub}
+              </span>
+            </button>
+          ))}
+        </nav>
+
+        {/* ================= WORD BANK ================= */}
+        {tab === 'bank' && (
+          <div>
+            {/* ---- Lookup ---- */}
+            <section className="py-8 border-b-2 border-black">
+              <p className="text-xs uppercase tracking-widest mb-3">
+                01 — Look up a word 查詢單字
+              </p>
+              <div className="flex">
+                <input
+                  className="flex-1 border-2 border-black border-r-0 px-3 py-3 text-lg font-bold bg-white focus:outline-none focus:bg-neutral-100 placeholder-neutral-300"
+                  placeholder="serendipity"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && !searching && lookupWord()}
+                />
+                <button
+                  onClick={lookupWord}
+                  disabled={searching || !searchTerm.trim()}
+                  className="flex items-center gap-2 bg-red-600 hover:bg-red-700 disabled:bg-neutral-300 text-white text-xs font-bold uppercase tracking-widest px-6 transition-colors"
+                >
+                  {searching ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+                  <span className="hidden sm:inline">查詢</span>
+                </button>
+              </div>
+
+              {searchError && (
+                <p className="mt-4 text-sm border-l-4 border-red-600 pl-3 text-neutral-700">
+                  {searchError}
+                </p>
+              )}
+
+              {savedFlash && (
+                <motion.p
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="mt-4 text-xs uppercase tracking-widest text-red-600 font-bold"
+                >
+                  {savedFlash}
+                </motion.p>
+              )}
+
+              {/* ---- Sense picker ---- */}
+              <AnimatePresence>
+                {senses && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <p className="text-xs uppercase tracking-widest text-neutral-500 mt-6 mb-3">
+                      {senses.length} sense{senses.length > 1 ? 's' : ''} — select one to save 選擇一項釋義儲存
+                    </p>
+                    <div className="border-t-2 border-black max-h-80 overflow-y-auto">
+                      {senses.map((s, i) => (
+                        <button
+                          key={i}
+                          onClick={() => saveSense(s)}
+                          className="w-full text-left border-b border-neutral-300 py-4 px-1 hover:bg-neutral-100 transition-colors group"
+                        >
+                          <div className="flex items-baseline gap-3 flex-wrap mb-1">
+                            <span className="text-xs font-bold text-red-600">{String(i + 1).padStart(2, '0')}</span>
+                            <span className="font-bold">{s.word}</span>
+                            <span className="text-xs uppercase tracking-widest text-neutral-500">{s.pos}</span>
+                            {s.ipa && <span className="text-xs text-neutral-400">{s.ipa}</span>}
+                            {!s.example && (
+                              <span className="text-xs uppercase tracking-widest text-red-600">no example 無例句</span>
+                            )}
+                          </div>
+                          <p className="text-sm text-neutral-800 pl-7">{s.meaning}</p>
+                          {s.example && (
+                            <p className="text-sm text-neutral-500 pl-7 mt-1">「{s.example}」</p>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => setSenses(null)}
+                      className="text-xs uppercase tracking-widest text-neutral-500 hover:text-black mt-3"
+                    >
+                      Cancel 取消 ×
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </section>
+
+            {/* ---- Manual entry ---- */}
+            <section className="py-6 border-b-2 border-black">
+              <button
+                onClick={() => setShowForm((s) => !s)}
+                className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest hover:text-red-600 transition-colors"
+              >
+                <Plus size={14} className={`transition-transform ${showForm ? 'rotate-45' : ''}`} />
+                {showForm ? 'Close manual entry 關閉手動新增' : 'Add manually 手動新增'}
+              </button>
+
+              <AnimatePresence>
+                {showForm && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="mt-6 space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <input
+                          className={inputClass}
+                          placeholder="Word 單字"
+                          value={form.word}
+                          onChange={(e) => setForm({ ...form, word: e.target.value })}
+                        />
+                        <select
+                          className={inputClass + ' appearance-none'}
+                          value={form.pos}
+                          onChange={(e) => setForm({ ...form, pos: e.target.value })}
+                        >
+                          {POS_OPTIONS.map((p) => <option key={p}>{p}</option>)}
+                        </select>
+                      </div>
+                      <input
+                        className={inputClass}
+                        placeholder="Pronunciation / IPA 音標（選填）"
+                        value={form.ipa}
+                        onChange={(e) => setForm({ ...form, ipa: e.target.value })}
+                      />
+                      <textarea
+                        className={inputClass}
+                        rows={2}
+                        placeholder="Meaning / definition 釋義"
+                        value={form.meaning}
+                        onChange={(e) => setForm({ ...form, meaning: e.target.value })}
+                      />
+                      <textarea
+                        className={inputClass}
+                        rows={2}
+                        placeholder="Example sentence containing the word 含此單字的例句"
+                        value={form.example}
+                        onChange={(e) => setForm({ ...form, example: e.target.value })}
+                      />
+                      {formError && (
+                        <p className="text-sm border-l-4 border-red-600 pl-3 text-neutral-700">{formError}</p>
+                      )}
+                      <button
+                        onClick={addWord}
+                        className="w-full bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest py-4 transition-colors"
+                      >
+                        Save entry 儲存
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </section>
+
+            {/* ---- Entry list ---- */}
+            <section className="pt-6">
+              <p className="text-xs uppercase tracking-widest text-neutral-500 mb-2">
+                02 — Entries 詞條 ({words.length})
+              </p>
+              {words.map((w, idx) => (
+                <motion.div
+                  key={w.id}
+                  layout
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="border-b border-neutral-300 py-5 grid grid-cols-12 gap-3"
+                >
+                  <div className="col-span-2 sm:col-span-1">
+                    <span className="text-xs font-bold text-red-600">
+                      {String(words.length - idx).padStart(2, '0')}
+                    </span>
+                  </div>
+                  <div className="col-span-9 sm:col-span-10">
+                    <div className="flex items-baseline gap-3 flex-wrap">
+                      <span className="text-xl font-bold tracking-tight">{w.word}</span>
+                      <span className="text-xs uppercase tracking-widest text-neutral-500">{w.pos}</span>
+                      {w.ipa && <span className="text-xs text-neutral-400">{w.ipa}</span>}
+                      <button
+                        onClick={() => speak(w.word)}
+                        className="text-neutral-400 hover:text-red-600 transition-colors"
+                        title="Listen 發音"
+                      >
+                        <Volume2 size={14} />
+                      </button>
+                    </div>
+                    <p className="text-sm text-neutral-800 mt-1">{w.meaning}</p>
+                    {w.example && (
+                      <p className="text-sm text-neutral-500 mt-1">「{w.example}」</p>
+                    )}
+                  </div>
+                  <div className="col-span-1 flex justify-end">
+                    <button
+                      onClick={() => deleteWord(w.id)}
+                      className="text-neutral-300 hover:text-red-600 transition-colors"
+                      title="Delete 刪除"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </motion.div>
+              ))}
+              {words.length === 0 && (
+                <p className="text-sm text-neutral-400 py-10">
+                  Empty. Look up your first word above. 字庫是空的，請先查詢你的第一個單字。
+                </p>
+              )}
+            </section>
+          </div>
+        )}
+
+        {/* ================= FLASHCARDS ================= */}
+        {tab === 'cards' && (
+          <div className="pt-8">
+            {words.length === 0 ? (
+              <p className="text-sm text-neutral-400 py-10">Add some words first. 請先新增單字。</p>
+            ) : (
+              <>
+                <div className="flex justify-between items-baseline mb-4">
+                  <p className="text-xs uppercase tracking-widest">
+                    字卡 {String(cardIndex + 1).padStart(2, '0')} / {String(words.length).padStart(2, '0')}
+                  </p>
+                  <p className="text-xs uppercase tracking-widest text-neutral-500">
+                    Tap to flip 點擊翻面
+                  </p>
+                </div>
+
+                <div className="w-full h-80 cursor-pointer" style={{ perspective: '1000px' }} onClick={() => setFlipped((f) => !f)}>
+                  <motion.div
+                    className="relative w-full h-full"
+                    style={{ transformStyle: 'preserve-3d' }}
+                    animate={{ rotateY: flipped ? 180 : 0 }}
+                    transition={{ duration: 0.45 }}
+                  >
+                    {/* Front */}
+                    <div
+                      className="absolute inset-0 bg-black text-white flex flex-col justify-between p-8"
+                      style={{ backfaceVisibility: 'hidden' }}
+                    >
+                      <div className="flex justify-between items-start">
+                        <span className="text-xs uppercase tracking-widest text-neutral-400">{currentCard.pos}</span>
+                        <span className="w-4 h-4 bg-red-600 block" />
+                      </div>
+                      <div>
+                        <span className="text-4xl sm:text-5xl font-bold tracking-tight break-words">
+                          {currentCard.word}
+                        </span>
+                        <div className="flex items-center gap-3 mt-3">
+                          <span className="text-neutral-400 text-sm">{currentCard.ipa}</span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); speak(currentCard.word); }}
+                            className="text-neutral-400 hover:text-white transition-colors"
+                          >
+                            <Volume2 size={18} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    {/* Back */}
+                    <div
+                      className="absolute inset-0 bg-white border-4 border-black flex flex-col justify-between p-8"
+                      style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
+                    >
+                      <div>
+                        <p className="text-xs uppercase tracking-widest text-red-600 mb-2">釋義 — Meaning</p>
+                        <p className="text-lg font-bold leading-snug">{currentCard.meaning}</p>
+                      </div>
+                      {currentCard.example && (
+                        <div>
+                          <p className="text-xs uppercase tracking-widest text-neutral-500 mb-2">例句 — Example</p>
+                          <p className="text-sm text-neutral-700">「{currentCard.example}」</p>
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                </div>
+
+                <div className="grid grid-cols-3 border-2 border-black mt-6">
+                  <button
+                    onClick={() => { setFlipped(false); setCardIndex((i) => (i - 1 + words.length) % words.length); }}
+                    className="flex items-center justify-center py-4 border-r-2 border-black hover:bg-neutral-100 transition-colors"
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                  <button
+                    onClick={() => setFlipped((f) => !f)}
+                    className="py-4 text-xs font-bold uppercase tracking-widest bg-black text-white hover:bg-red-600 transition-colors"
+                  >
+                    Flip 翻面
+                  </button>
+                  <button
+                    onClick={() => { setFlipped(false); setCardIndex((i) => (i + 1) % words.length); }}
+                    className="flex items-center justify-center py-4 border-l-2 border-black hover:bg-neutral-100 transition-colors"
+                  >
+                    <ChevronRight size={18} />
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ================= CLOZE TEST ================= */}
+        {tab === 'quiz' && (
+          <div className="pt-8">
+            {words.filter((w) => w.example).length < 4 ? (
+              <p className="text-sm text-neutral-400 py-10">
+                You need at least 4 words with example sentences to generate a test. 至少需要 4 個含例句的單字才能產生測驗。
+              </p>
+            ) : !quiz ? (
+              <div className="border-4 border-black p-8">
+                <p className="text-xs uppercase tracking-widest text-red-600 mb-3">Cloze recall 填空測驗</p>
+                <h2 className="text-3xl font-bold tracking-tight leading-tight mb-4">
+                  The word is removed.<br />You put it back.
+                </h2>
+                <p className="text-sm text-neutral-600 mb-8 max-w-md">
+                  Each target word is blanked out of its example sentence.
+                  Choose the correct word from four options.
+                  例句中的目標單字已被挖空，請從四個選項中選出正確的字。
+                </p>
+                <button
+                  onClick={startQuiz}
+                  className="flex items-center gap-3 bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest px-8 py-4 transition-colors"
+                >
+                  Start 開始 — {Math.min(10, words.filter((w) => w.example).length)} questions
+                  <ArrowRight size={14} />
+                </button>
+              </div>
+            ) : quiz.finished ? (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="border-4 border-black p-8"
+              >
+                <p className="text-xs uppercase tracking-widest text-red-600 mb-3">結果 — Result</p>
+                <p className="text-6xl sm:text-7xl font-bold tracking-tight">
+                  {quiz.score}<span className="text-neutral-300">/{quiz.questions.length}</span>
+                </p>
+                <p className="text-sm text-neutral-600 mt-4 mb-8 max-w-md">
+                  {quiz.score === quiz.questions.length
+                    ? 'Perfect score. Outstanding recall. 滿分，記憶力驚人。'
+                    : quiz.score >= quiz.questions.length * 0.7
+                    ? 'Good. Review the missed words in the flashcards. 不錯，用字卡複習答錯的單字吧。'
+                    : 'Keep practising with the flashcards, then try again. 用字卡多加練習後再試一次。'}
+                </p>
+                <button
+                  onClick={startQuiz}
+                  className="flex items-center gap-3 bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest px-8 py-4 transition-colors"
+                >
+                  <RotateCcw size={14} /> Retake 再測一次
+                </button>
+              </motion.div>
+            ) : (
+              (() => {
+                const q = quiz.questions[quiz.current];
+                return (
+                  <div>
+                    <div className="flex justify-between items-baseline mb-2">
+                      <p className="text-xs uppercase tracking-widest">
+                        題目 {String(quiz.current + 1).padStart(2, '0')} / {String(quiz.questions.length).padStart(2, '0')}
+                      </p>
+                      <p className="text-xs uppercase tracking-widest text-neutral-500">
+                        Score 得分 {quiz.score}
+                      </p>
+                    </div>
+
+                    {/* Progress bar */}
+                    <div className="w-full h-1 bg-neutral-200 mb-8">
+                      <div
+                        className="h-1 bg-red-600 transition-all duration-300"
+                        style={{ width: `${(quiz.current / quiz.questions.length) * 100}%` }}
+                      />
+                    </div>
+
+                    <p className="text-xs uppercase tracking-widest text-red-600 mb-3">Fill the gap 填空</p>
+                    <p className="text-xl sm:text-2xl font-bold tracking-tight leading-snug mb-3">
+                      「{q.cloze}」
+                    </p>
+                    <p className="text-xs text-neutral-500 mb-8">
+                      {q.target.pos} — {q.target.meaning}
+                    </p>
+
+                    <div className="border-t-2 border-black">
+                      {q.choices.map((choice, ci) => {
+                        const isCorrect = choice === q.target.word;
+                        const isSelected = quiz.selected === choice;
+                        let style = 'hover:bg-neutral-100';
+                        if (quiz.selected !== null) {
+                          if (isCorrect) style = 'bg-black text-white';
+                          else if (isSelected) style = 'bg-red-600 text-white';
+                          else style = 'text-neutral-300';
+                        }
+                        return (
+                          <button
+                            key={choice}
+                            onClick={() => answerQuiz(choice)}
+                            disabled={quiz.selected !== null}
+                            className={`w-full flex items-baseline gap-4 text-left border-b-2 border-black px-2 py-4 font-bold transition-colors ${style}`}
+                          >
+                            <span className="text-xs">{['A', 'B', 'C', 'D'][ci]}</span>
+                            <span className="text-lg">{choice}</span>
+                            {quiz.selected !== null && isCorrect && (
+                              <span className="ml-auto text-xs uppercase tracking-widest">正確 ✓</span>
+                            )}
+                            {quiz.selected !== null && isSelected && !isCorrect && (
+                              <span className="ml-auto text-xs uppercase tracking-widest">錯誤 ×</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <AnimatePresence>
+                      {quiz.selected !== null && (
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-6">
+                          <p className="text-sm text-neutral-600 border-l-4 border-black pl-3 mb-6">
+                            「{q.target.example}」
+                          </p>
+                          <button
+                            onClick={nextQuestion}
+                            className="w-full flex items-center justify-center gap-3 bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest py-4 transition-colors"
+                          >
+                            {quiz.current + 1 >= quiz.questions.length ? 'See result 看結果' : 'Next 下一題'}
+                            <ArrowRight size={14} />
+                          </button>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                );
+              })()
+            )}
+          </div>
+        )}
+
+        {/* ===== Footer ===== */}
+        <footer className="mt-16 pt-4 border-t-2 border-black flex justify-between">
+          <p className="text-xs uppercase tracking-widest text-neutral-500">Word.bank 字庫</p>
+          <p className="text-xs uppercase tracking-widest text-neutral-500">2026</p>
+        </footer>
+      </div>
+    </div>
+  );
+}
