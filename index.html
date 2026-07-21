@@ -38,6 +38,7 @@
 
 <div id="errorBar" class="hidden bg-red-600 text-white text-xs font-bold px-4 py-3"></div>
 <div id="app" class="max-w-3xl mx-auto px-4 pb-16"></div>
+<input type="file" id="importFile" accept=".json,application/json" class="hidden">
 
 <script>
 'use strict';
@@ -83,7 +84,9 @@ var IC = {
   volume: function (s, c) { return icon('<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>', s, c); },
   loader: function (s, c) { return icon('<path d="M21 12a9 9 0 1 1-6.219-8.56"/>', s, 'spin ' + (c || '')); },
   logout: function (s, c) { return icon('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>', s, c); },
-  cloud: function (s, c) { return icon('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>', s, c); }
+  cloud: function (s, c) { return icon('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>', s, c); },
+  download: function (s, c) { return icon('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>', s, c); },
+  upload: function (s, c) { return icon('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>', s, c); }
 };
 
 var GOOGLE_G = '<svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>';
@@ -131,9 +134,13 @@ var state = {
   showForm: false,
   form: { word: '', pos: 'noun', ipa: '', meaning: '', example: '' },
   formError: '',
+  formNotice: '',
   editingId: null,
   editForm: { word: '', pos: 'noun', ipa: '', meaning: '', example: '' },
   editError: '',
+  importing: false,
+  importMsg: '',
+  importIsError: false,
   cardIndex: 0,
   flipped: false,
   quiz: null
@@ -206,6 +213,7 @@ auth.onAuthStateChanged(function (u) {
     state.quiz = null;
     state.senses = null;
     state.editingId = null;
+    state.importMsg = '';
   }
   render();
 });
@@ -291,6 +299,147 @@ function signInGoogle() {
     }
     render();
   });
+}
+
+// ---------- Export / Import ----------
+function exportWords() {
+  var payload = {
+    app: 'wordbank',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    words: state.words.map(function (w) {
+      return {
+        word: w.word || '',
+        pos: w.pos || 'noun',
+        ipa: w.ipa || '',
+        meaning: w.meaning || '',
+        example: w.example || ''
+      };
+    })
+  };
+  var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'wordbank-export-' + new Date().toISOString().slice(0, 10) + '.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  state.importMsg = 'Exported ' + payload.words.length + ' entries \u5DF2\u532F\u51FA ' + payload.words.length + ' \u500B\u8A5E\u689D\u3002';
+  state.importIsError = false;
+  render();
+}
+
+function importFromFile(file) {
+  if (!file) return;
+  state.importing = true;
+  state.importMsg = '';
+  state.importIsError = false;
+  render();
+
+  var reader = new FileReader();
+  reader.onerror = function () {
+    state.importing = false;
+    state.importMsg = 'Could not read the file. \u7121\u6CD5\u8B80\u53D6\u6A94\u6848\u3002';
+    state.importIsError = true;
+    render();
+  };
+  reader.onload = function () {
+    var incoming;
+    try {
+      var parsed = JSON.parse(reader.result);
+      // Accept both the export format { words: [...] } and a bare array
+      incoming = Array.isArray(parsed) ? parsed : parsed.words;
+      if (!Array.isArray(incoming)) throw new Error('bad format');
+    } catch (e) {
+      state.importing = false;
+      state.importMsg = 'This is not a valid Word.bank export file. \u9019\u4E0D\u662F\u6709\u6548\u7684 Word.bank \u532F\u51FA\u6A94\u3002';
+      state.importIsError = true;
+      render();
+      return;
+    }
+
+    // Validate and normalise entries (capitalisation is preserved)
+    var valid = [];
+    incoming.forEach(function (w) {
+      if (!w || typeof w !== 'object') return;
+      var word = String(w.word || '').trim();
+      var meaning = String(w.meaning || '').trim();
+      if (!word || !meaning) return;
+      valid.push({
+        word: word,
+        pos: POS_OPTIONS.indexOf(w.pos) !== -1 ? w.pos : 'noun',
+        ipa: String(w.ipa || '').trim(),
+        meaning: meaning,
+        example: String(w.example || '').trim()
+      });
+    });
+
+    if (valid.length === 0) {
+      state.importing = false;
+      state.importMsg = 'No valid entries found in the file. \u6A94\u6848\u4E2D\u6C92\u6709\u6709\u6548\u7684\u8A5E\u689D\u3002';
+      state.importIsError = true;
+      render();
+      return;
+    }
+
+    // Skip entries that already exist (same word + same meaning,
+    // compared case-insensitively), and duplicates within the file itself
+    var existing = {};
+    state.words.forEach(function (w) {
+      existing[(w.word || '').toLowerCase() + '\u0000' + (w.meaning || '').toLowerCase()] = true;
+    });
+    var toAdd = [];
+    var skipped = 0;
+    valid.forEach(function (w) {
+      var key = w.word.toLowerCase() + '\u0000' + w.meaning.toLowerCase();
+      if (existing[key]) { skipped++; return; }
+      existing[key] = true;
+      toAdd.push(w);
+    });
+
+    if (toAdd.length === 0) {
+      state.importing = false;
+      state.importMsg = 'Nothing to import \u2014 all ' + skipped + ' entries already exist. \u6240\u6709\u8A5E\u689D\u90FD\u5DF2\u5B58\u5728\uFF0C\u7121\u9700\u532F\u5165\u3002';
+      state.importIsError = false;
+      render();
+      return;
+    }
+
+    // Firestore batches are limited to 500 writes each
+    var base = Date.now();
+    var batches = [];
+    for (var i = 0; i < toAdd.length; i += 450) {
+      var batch = db.batch();
+      toAdd.slice(i, i + 450).forEach(function (w, j) {
+        var createdAt = base - (i + j);
+        batch.set(wordsRef().doc(String(createdAt)), {
+          word: w.word,
+          pos: w.pos,
+          ipa: w.ipa,
+          meaning: w.meaning,
+          example: w.example,
+          createdAt: createdAt
+        });
+      });
+      batches.push(batch.commit());
+    }
+
+    Promise.all(batches).then(function () {
+      state.importing = false;
+      state.importMsg = 'Imported ' + toAdd.length + ' entries' + (skipped ? ', skipped ' + skipped + ' duplicates' : '') + '. \u5DF2\u532F\u5165 ' + toAdd.length + ' \u500B\u8A5E\u689D' + (skipped ? '\uFF0C\u8DF3\u904E ' + skipped + ' \u500B\u91CD\u8907\u9805' : '') + '\u3002';
+      state.importIsError = false;
+      state.cardIndex = 0;
+      render();
+    }).catch(function (err) {
+      state.importing = false;
+      state.importMsg = 'Import failed \u532F\u5165\u5931\u6557: ' + err.message;
+      state.importIsError = true;
+      render();
+    });
+  };
+  reader.readAsText(file);
 }
 
 // ---------- Render: sign-in / loading screens ----------
@@ -390,19 +539,26 @@ function bankHTML() {
       '<p class="text-xs uppercase tracking-widest text-neutral-500 mt-6 mb-3">' +
         state.senses.length + ' sense' + (state.senses.length > 1 ? 's' : '') + ' \u2014 select one to save \u9078\u64C7\u4E00\u9805\u91CB\u7FA9\u5132\u5B58' +
       '</p>' +
-      '<div class="border-t-2 border-black max-h-80 overflow-y-auto">';
+      '<div class="border-t-2 border-black max-h-96 overflow-y-auto">';
     state.senses.forEach(function (s, i) {
-      html += '<button data-action="save-sense" data-i="' + i + '" class="w-full text-left border-b border-neutral-300 py-4 px-1 hover:bg-neutral-100 transition-colors">' +
-        '<div class="flex items-baseline gap-3 flex-wrap mb-1 pointer-events-none">' +
-          '<span class="text-xs font-bold text-red-600">' + pad2(i + 1) + '</span>' +
-          '<span class="font-bold">' + esc(s.word) + '</span>' +
-          '<span class="text-xs uppercase tracking-widest text-neutral-500">' + esc(s.pos) + '</span>' +
-          (s.ipa ? '<span class="text-xs text-neutral-400">' + esc(s.ipa) + '</span>' : '') +
-          (!s.example ? '<span class="text-xs uppercase tracking-widest text-red-600">no example \u7121\u4F8B\u53E5</span>' : '') +
-        '</div>' +
-        '<p class="text-sm text-neutral-800 pl-7 pointer-events-none">' + esc(s.meaning) + '</p>' +
-        (s.example ? '<p class="text-sm text-neutral-500 pl-7 mt-1 pointer-events-none">\u300C' + esc(s.example) + '\u300D</p>' : '') +
-      '</button>';
+      html += '<div class="border-b border-neutral-300">' +
+        '<button data-action="save-sense" data-i="' + i + '" class="w-full text-left pt-4 pb-2 px-1 hover:bg-neutral-100 transition-colors">' +
+          '<div class="flex items-baseline gap-3 flex-wrap mb-1 pointer-events-none">' +
+            '<span class="text-xs font-bold text-red-600">' + pad2(i + 1) + '</span>' +
+            '<span class="font-bold">' + esc(s.word) + '</span>' +
+            '<span class="text-xs uppercase tracking-widest text-neutral-500">' + esc(s.pos) + '</span>' +
+            (s.ipa ? '<span class="text-xs text-neutral-400">' + esc(s.ipa) + '</span>' : '') +
+            (!s.example ? '<span class="text-xs uppercase tracking-widest text-red-600">no example \u7121\u4F8B\u53E5</span>' : '') +
+          '</div>' +
+          '<p class="text-sm text-neutral-800 pl-7 pointer-events-none">' + esc(s.meaning) + '</p>' +
+          (s.example ? '<p class="text-sm text-neutral-500 pl-7 mt-1 pointer-events-none">\u300C' + esc(s.example) + '\u300D</p>' : '') +
+        '</button>' +
+        // Save this sense but write your own example sentence instead
+        '<button data-action="own-example" data-i="' + i + '" class="flex items-center gap-2 pl-8 pb-3 text-xs uppercase tracking-widest text-neutral-500 hover:text-red-600 transition-colors">' +
+          '<span class="pointer-events-none">' + IC.pencil(12) + '</span>' +
+          '<span class="pointer-events-none">Write my own example \u81EA\u5BEB\u4F8B\u53E5</span>' +
+        '</button>' +
+      '</div>';
     });
     html += '</div>' +
       // None of the senses fits: open the manual form pre-filled with the word + IPA
@@ -427,6 +583,7 @@ function bankHTML() {
       return '<option' + (state.form.pos === p ? ' selected' : '') + '>' + p + '</option>';
     }).join('');
     html += '<div class="mt-6 space-y-3 fade-in">' +
+      (state.formNotice ? '<p class="text-sm border-l-4 border-black pl-3 text-neutral-700">' + esc(state.formNotice) + '</p>' : '') +
       '<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">' +
         '<input data-form="word" class="' + INPUT_CLASS + '" placeholder="Word \u55AE\u5B57" value="' + esc(state.form.word) + '">' +
         '<select data-form="pos" class="' + INPUT_CLASS + ' appearance-none">' + posOpts + '</select>' +
@@ -441,7 +598,7 @@ function bankHTML() {
   html += '</section>';
 
   // Entry list
-  html += '<section class="pt-6">' +
+  html += '<section class="pt-6 border-b-2 border-black pb-8">' +
     '<p class="text-xs uppercase tracking-widest text-neutral-500 mb-2">02 \u2014 Entries \u8A5E\u689D (' + state.words.length + ')</p>';
   if (state.words.length === 0) {
     html += '<p class="text-sm text-neutral-400 py-10">Empty. Look up your first word above. \u5B57\u5EAB\u662F\u7A7A\u7684\uFF0C\u8ACB\u5148\u67E5\u8A62\u4F60\u7684\u7B2C\u4E00\u500B\u55AE\u5B57\u3002</p>';
@@ -491,7 +648,26 @@ function bankHTML() {
       '</div>';
     });
   }
-  html += '</section></div>';
+  html += '</section>';
+
+  // Transfer: export / import
+  html += '<section class="pt-6">' +
+    '<p class="text-xs uppercase tracking-widest text-neutral-500 mb-2">03 \u2014 Transfer \u8F49\u79FB</p>' +
+    '<p class="text-sm text-neutral-600 mb-4 max-w-md">Export your word list as a file, then import it into another account. Duplicates are skipped automatically. \u5C07\u5B57\u5EAB\u532F\u51FA\u70BA\u6A94\u6848\uFF0C\u518D\u5728\u53E6\u4E00\u500B\u5E33\u6236\u532F\u5165\uFF1B\u91CD\u8907\u7684\u8A5E\u689D\u6703\u81EA\u52D5\u8DF3\u904E\u3002</p>' +
+    '<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">' +
+      '<button data-action="export" ' + (state.words.length === 0 ? 'disabled' : '') + ' class="flex items-center justify-center gap-3 border-2 border-black bg-white hover:bg-black hover:text-white disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-black text-xs font-bold uppercase tracking-widest py-4 transition-colors">' +
+        '<span class="pointer-events-none">' + IC.download(16) + '</span>' +
+        '<span class="pointer-events-none">Export ' + state.words.length + ' entries \u532F\u51FA</span>' +
+      '</button>' +
+      '<button data-action="import" ' + (state.importing ? 'disabled' : '') + ' class="flex items-center justify-center gap-3 border-2 border-black bg-white hover:bg-black hover:text-white disabled:opacity-40 text-xs font-bold uppercase tracking-widest py-4 transition-colors">' +
+        '<span class="pointer-events-none">' + (state.importing ? IC.loader(16) : IC.upload(16)) + '</span>' +
+        '<span class="pointer-events-none">' + (state.importing ? 'Importing \u532F\u5165\u4E2D\u2026' : 'Import from file \u532F\u5165') + '</span>' +
+      '</button>' +
+    '</div>' +
+    (state.importMsg ? '<p class="mt-4 text-sm border-l-4 pl-3 fade-in ' + (state.importIsError ? 'border-red-600 text-neutral-700' : 'border-black text-neutral-700') + '">' + esc(state.importMsg) + '</p>' : '') +
+  '</section>';
+
+  html += '</div>';
   return html;
 }
 
@@ -636,7 +812,7 @@ function render() {
 
 // ---------- Dictionary lookup ----------
 function doLookup() {
-  var term = state.searchTerm.trim().toLowerCase();
+  var term = state.searchTerm.trim();
   if (!term || state.searching) return;
   state.searching = true;
   state.searchError = '';
@@ -705,26 +881,35 @@ function persistWord(entry) {
   });
 }
 
+// Open the manual form pre-filled from a dictionary sense so the user
+// can write their own example sentence (or adapt the dictionary one).
+function openFormFromSense(s, notice, prefillExample) {
+  state.form = {
+    word: s.word,
+    pos: POS_OPTIONS.indexOf(s.pos) !== -1 ? s.pos : 'noun',
+    ipa: s.ipa || '',
+    meaning: s.meaning || '',
+    example: prefillExample ? (s.example || '') : ''
+  };
+  state.showForm = true;
+  state.senses = null;
+  state.searchTerm = '';
+  state.formError = '';
+  state.formNotice = notice;
+  render();
+  var sec = document.getElementById('manualSection');
+  if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function saveSense(i) {
   var s = state.senses[i];
   if (!s) return;
   if (!s.example) {
-    state.form = {
-      word: s.word.toLowerCase(),
-      pos: POS_OPTIONS.indexOf(s.pos) !== -1 ? s.pos : 'noun',
-      ipa: s.ipa,
-      meaning: s.meaning,
-      example: ''
-    };
-    state.showForm = true;
-    state.senses = null;
-    state.searchTerm = '';
-    state.formError = 'This sense has no example sentence \u2014 write one so it can be used in the cloze test. \u6B64\u91CB\u7FA9\u6C92\u6709\u4F8B\u53E5\uFF0C\u8ACB\u81EA\u884C\u586B\u5BEB\u4E00\u53E5\uFF0C\u4EE5\u4FBF\u7528\u65BC\u586B\u7A7A\u6E2C\u9A57\u3002';
-    render();
+    openFormFromSense(s, 'This sense has no example sentence \u2014 write one so it can be used in the cloze test. \u6B64\u91CB\u7FA9\u6C92\u6709\u4F8B\u53E5\uFF0C\u8ACB\u81EA\u884C\u586B\u5BEB\u4E00\u53E5\uFF0C\u4EE5\u4FBF\u7528\u65BC\u586B\u7A7A\u6E2C\u9A57\u3002', false);
     return;
   }
   persistWord({
-    word: s.word.toLowerCase(),
+    word: s.word,
     pos: s.pos,
     ipa: s.ipa,
     meaning: s.meaning,
@@ -734,23 +919,33 @@ function saveSense(i) {
   state.senses = null;
   state.searchTerm = '';
   state.cardIndex = 0;
-  setFlash('"' + s.word.toLowerCase() + '" added \u5DF2\u65B0\u589E');
+  setFlash('"' + s.word + '" added \u5DF2\u65B0\u589E');
   render();
+}
+
+// "Write my own example" on a sense: keep the word, IPA and meaning,
+// pre-fill the dictionary example as a starting point (if any) and let
+// the user rewrite or replace it before saving.
+function ownExample(i) {
+  var s = state.senses[i];
+  if (!s) return;
+  openFormFromSense(s, 'Write your own example sentence below' + (s.example ? ' \u2014 the dictionary\u2019s sentence is pre-filled as a starting point, edit or replace it freely.' : '.') + ' \u8ACB\u5728\u4E0B\u65B9\u81EA\u5BEB\u4F8B\u53E5' + (s.example ? '\uFF0C\u5B57\u5178\u4F8B\u53E5\u5DF2\u9810\u586B\u4F5C\u70BA\u53C3\u8003\uFF0C\u53EF\u81EA\u7531\u4FEE\u6539\u6216\u66FF\u63DB\u3002' : '\u3002'), true);
 }
 
 // "None of these fits" — open the manual form pre-filled with the
 // searched word and its IPA, so the user writes their own meaning/example.
 function manualFromSearch() {
-  var word = state.searchTerm.trim().toLowerCase();
+  var word = state.searchTerm.trim();
   var ipa = '';
   var pos = 'noun';
   if (state.senses && state.senses.length > 0) {
-    word = state.senses[0].word.toLowerCase();
+    word = state.senses[0].word;
     ipa = state.senses[0].ipa || '';
     if (POS_OPTIONS.indexOf(state.senses[0].pos) !== -1) pos = state.senses[0].pos;
   }
   state.form = { word: word, pos: pos, ipa: ipa, meaning: '', example: '' };
   state.formError = '';
+  state.formNotice = '';
   state.showForm = true;
   state.senses = null;
   state.searchTerm = '';
@@ -766,17 +961,19 @@ function addWord() {
     render();
     return;
   }
+  var savedWord = f.word.trim(); // capitalisation preserved, e.g. "Sophie's choice"
   persistWord({
-    word: f.word.trim().toLowerCase(),
+    word: savedWord,
     pos: f.pos,
     ipa: f.ipa.trim(),
     meaning: f.meaning.trim(),
     example: f.example.trim(),
     createdAt: Date.now()
   });
-  setFlash('"' + f.word.trim().toLowerCase() + '" added \u5DF2\u65B0\u589E');
+  setFlash('"' + savedWord + '" added \u5DF2\u65B0\u589E');
   state.form = { word: '', pos: 'noun', ipa: '', meaning: '', example: '' };
   state.formError = '';
+  state.formNotice = '';
   state.showForm = false;
   state.cardIndex = 0;
   render();
@@ -808,7 +1005,7 @@ function saveEdit() {
     render();
     return;
   }
-  var savedWord = f.word.trim().toLowerCase();
+  var savedWord = f.word.trim(); // capitalisation preserved
   wordsRef().doc(String(state.editingId)).update({
     word: savedWord,
     pos: f.pos,
@@ -894,6 +1091,8 @@ document.addEventListener('click', function (e) {
     doLookup();
   } else if (action === 'save-sense') {
     saveSense(parseInt(el.getAttribute('data-i'), 10));
+  } else if (action === 'own-example') {
+    ownExample(parseInt(el.getAttribute('data-i'), 10));
   } else if (action === 'manual-from-search') {
     manualFromSearch();
   } else if (action === 'cancel-senses') {
@@ -902,6 +1101,7 @@ document.addEventListener('click', function (e) {
   } else if (action === 'toggle-form') {
     state.showForm = !state.showForm;
     state.formError = '';
+    state.formNotice = '';
     render();
   } else if (action === 'add-word') {
     addWord();
@@ -913,6 +1113,10 @@ document.addEventListener('click', function (e) {
     cancelEdit();
   } else if (action === 'delete') {
     deleteWord(el.getAttribute('data-id'));
+  } else if (action === 'export') {
+    exportWords();
+  } else if (action === 'import') {
+    document.getElementById('importFile').click();
   } else if (action === 'speak') {
     speak(el.getAttribute('data-word'));
   } else if (action === 'flip') {
@@ -934,6 +1138,13 @@ document.addEventListener('click', function (e) {
   } else if (action === 'next-q') {
     nextQuestion();
   }
+});
+
+// File chosen for import
+document.getElementById('importFile').addEventListener('change', function (e) {
+  var file = e.target.files && e.target.files[0];
+  e.target.value = ''; // allow re-selecting the same file later
+  if (file) importFromFile(file);
 });
 
 // Keep typed values in state so re-renders never lose them
