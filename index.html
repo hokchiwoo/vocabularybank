@@ -86,7 +86,11 @@ var IC = {
   logout: function (s, c) { return icon('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>', s, c); },
   cloud: function (s, c) { return icon('<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>', s, c); },
   download: function (s, c) { return icon('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>', s, c); },
-  upload: function (s, c) { return icon('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>', s, c); }
+  upload: function (s, c) { return icon('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>', s, c); },
+  shuffle: function (s, c) { return icon('<polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/>', s, c); },
+  list: function (s, c) { return icon('<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>', s, c); },
+  check: function (s, c) { return icon('<polyline points="20 6 9 17 4 12"/>', s, c); },
+  clock: function (s, c) { return icon('<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>', s, c); }
 };
 
 var GOOGLE_G = '<svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>';
@@ -141,6 +145,12 @@ var state = {
   importing: false,
   importMsg: '',
   importIsError: false,
+  deckIds: [],           // flashcard order (list of word ids in this session)
+  deckShuffled: false,   // whether the deck is currently shuffled
+  deckMode: 'all',       // 'all' = every word, 'due' = only cards due for review
+  rated: {},             // ids rated this session (removed from the queue)
+  sessionStats: { good: 0, again: 0 },
+  lastRating: '',        // feedback text after swiping/rating a card
   cardIndex: 0,
   flipped: false,
   quiz: null
@@ -192,6 +202,184 @@ function setFlash(msg) {
 }
 
 var INPUT_CLASS = 'w-full border-2 border-black px-3 py-3 text-sm bg-white focus:outline-none focus:bg-neutral-100 placeholder-neutral-400';
+var DAY_MS = 86400000;
+
+// ---------- Spaced repetition (Anki-style, simplified) ----------
+// Each word may carry: srs = { interval (days), reps, dueAt (ms), lastResult }
+// "Got it"  -> interval grows: 1 -> 2 -> 5 -> 12 -> 28 -> 64 ... days
+// "Revisit" -> interval resets to 0 and the card is due immediately,
+//              so it keeps returning until you mark it known.
+function isDue(w) {
+  return !w.srs || !w.srs.dueAt || w.srs.dueAt <= Date.now();
+}
+
+function dueLabel(w) {
+  if (!w.srs || !w.srs.reps) return 'NEW \u65B0';
+  if (w.srs.dueAt <= Date.now()) return 'DUE \u5230\u671F';
+  var diff = w.srs.dueAt - Date.now();
+  if (diff < DAY_MS) return 'NEXT \u4E0B\u6B21 <1d';
+  return 'NEXT \u4E0B\u6B21 ' + Math.round(diff / DAY_MS) + 'd';
+}
+
+// ---------- Flashcard deck (session queue) ----------
+// The pool respects the All/Due filter and excludes cards already rated
+// this session. Newly added words appear at the front even when shuffled.
+function deckPool() {
+  var pool = state.words;
+  if (state.deckMode === 'due') pool = pool.filter(isDue);
+  return pool.filter(function (w) { return !state.rated[w.id]; });
+}
+
+function rebuildDeck() {
+  var ids = deckPool().map(function (w) { return w.id; });
+  if (state.deckShuffled) {
+    var kept = state.deckIds.filter(function (id) { return ids.indexOf(id) !== -1; });
+    var added = ids.filter(function (id) { return kept.indexOf(id) === -1; });
+    state.deckIds = added.concat(kept);
+  } else {
+    state.deckIds = ids;
+  }
+  if (state.cardIndex >= state.deckIds.length) { state.cardIndex = 0; state.flipped = false; }
+}
+
+function wordById(id) {
+  for (var i = 0; i < state.words.length; i++) {
+    if (state.words[i].id === id) return state.words[i];
+  }
+  return null;
+}
+
+function resetSession() {
+  state.rated = {};
+  state.sessionStats = { good: 0, again: 0 };
+  state.lastRating = '';
+  state.cardIndex = 0;
+  state.flipped = false;
+}
+
+function shuffleDeck() {
+  state.deckShuffled = true;
+  state.deckIds = shuffle(deckPool().map(function (w) { return w.id; }));
+  state.cardIndex = 0;
+  state.flipped = false;
+  render();
+}
+
+function resetDeck() {
+  state.deckShuffled = false;
+  state.deckIds = deckPool().map(function (w) { return w.id; });
+  state.cardIndex = 0;
+  state.flipped = false;
+  render();
+}
+
+// Rate the current card. known=true (swipe left / "Got it") grows the
+// interval; known=false (swipe right / "Revisit") keeps it due so it
+// reappears next session, just like Anki's "Again".
+function rateCard(known) {
+  if (state.deckIds.length === 0) return;
+  var id = state.deckIds[state.cardIndex];
+  var w = wordById(id);
+  if (!w) return;
+  var prev = w.srs || { interval: 0, reps: 0 };
+  var srs;
+  var msg;
+  if (known) {
+    var next = prev.interval <= 0 ? 1 : Math.round(prev.interval * 2.3);
+    srs = { interval: next, reps: (prev.reps || 0) + 1, dueAt: Date.now() + next * DAY_MS, lastResult: 'good' };
+    state.sessionStats.good++;
+    msg = '\u2713 \u201C' + w.word + '\u201D \u2014 next review in ' + next + ' day' + (next > 1 ? 's' : '') + ' ' + next + ' \u5929\u5F8C\u518D\u8907\u7FD2';
+  } else {
+    srs = { interval: 0, reps: (prev.reps || 0) + 1, dueAt: Date.now(), lastResult: 'again' };
+    state.sessionStats.again++;
+    msg = '\u21BB \u201C' + w.word + '\u201D \u2014 will keep returning until you know it \u6703\u6301\u7E8C\u51FA\u73FE\u76F4\u5230\u4F60\u8A18\u4F4F\u5B83';
+  }
+  wordsRef().doc(String(id)).update({ srs: srs }).catch(function (err) {
+    state.syncError = 'Could not save review \u7121\u6CD5\u5132\u5B58\u8907\u7FD2\u7D00\u9304: ' + err.message;
+  });
+  state.rated[id] = true;
+  state.lastRating = msg;
+  state.flipped = false;
+  state.deckIds.splice(state.cardIndex, 1);
+  if (state.cardIndex >= state.deckIds.length) state.cardIndex = 0;
+  render();
+}
+
+// ---------- Swipe gesture (Tinder/Anki-style) ----------
+var swipe = { active: false, startX: 0, startY: 0, dx: 0, startT: 0 };
+
+function resetHints() {
+  var k = document.getElementById('hintKnow');
+  var a = document.getElementById('hintAgain');
+  if (k) k.style.opacity = 0;
+  if (a) a.style.opacity = 0;
+}
+
+document.addEventListener('pointerdown', function (e) {
+  var card = e.target.closest('#swipeCard');
+  if (!card) return;
+  if (e.target.closest('[data-action]')) return; // e.g. the speak button
+  swipe.active = true;
+  swipe.startX = e.clientX;
+  swipe.startY = e.clientY;
+  swipe.dx = 0;
+  swipe.startT = Date.now();
+  card.style.transition = 'none';
+  if (card.setPointerCapture) {
+    try { card.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+  }
+});
+
+document.addEventListener('pointermove', function (e) {
+  if (!swipe.active) return;
+  var card = document.getElementById('swipeCard');
+  if (!card) { swipe.active = false; return; }
+  swipe.dx = e.clientX - swipe.startX;
+  card.style.transform = 'translateX(' + swipe.dx + 'px) rotate(' + (swipe.dx * 0.04) + 'deg)';
+  var op = Math.min(Math.abs(swipe.dx) / 100, 1);
+  var k = document.getElementById('hintKnow');
+  var a = document.getElementById('hintAgain');
+  if (swipe.dx < 0) { if (k) k.style.opacity = op; if (a) a.style.opacity = 0; }
+  else { if (a) a.style.opacity = op; if (k) k.style.opacity = 0; }
+});
+
+function endSwipe() {
+  if (!swipe.active) return;
+  swipe.active = false;
+  var card = document.getElementById('swipeCard');
+  if (!card) return;
+  var dx = swipe.dx;
+  var THRESHOLD = 90;
+
+  if (Math.abs(dx) >= THRESHOLD) {
+    // Fly the card off screen, then rate it: left = got it, right = revisit
+    var dir = dx > 0 ? 1 : -1;
+    card.style.transition = 'transform 0.25s ease-out, opacity 0.25s ease-out';
+    card.style.transform = 'translateX(' + dir * window.innerWidth + 'px) rotate(' + dir * 20 + 'deg)';
+    card.style.opacity = '0';
+    setTimeout(function () { rateCard(dir === -1); }, 240);
+  } else if (Math.abs(dx) < 8 && Date.now() - swipe.startT < 500) {
+    // Treated as a tap: flip the card
+    card.style.transform = '';
+    state.flipped = !state.flipped;
+    var inner = document.getElementById('cardInner');
+    if (inner) inner.classList.toggle('flipped', state.flipped);
+    resetHints();
+  } else {
+    // Not far enough: snap back
+    card.style.transition = 'transform 0.2s ease-out';
+    card.style.transform = '';
+    resetHints();
+  }
+}
+document.addEventListener('pointerup', endSwipe);
+document.addEventListener('pointercancel', function () {
+  if (!swipe.active) return;
+  swipe.active = false;
+  var card = document.getElementById('swipeCard');
+  if (card) { card.style.transition = 'transform 0.2s ease-out'; card.style.transform = ''; }
+  resetHints();
+});
 
 // ---------- Firestore: auth + live sync ----------
 function wordsRef() {
@@ -206,9 +394,15 @@ auth.onAuthStateChanged(function (u) {
   if (unsubscribeWords) { unsubscribeWords(); unsubscribeWords = null; }
   if (u) {
     state.words = loadCache(u.uid); // instant paint while cloud loads
+    resetSession();
+    rebuildDeck();
     startSync(u);
   } else {
     state.words = [];
+    state.deckIds = [];
+    state.deckShuffled = false;
+    state.deckMode = 'all';
+    resetSession();
     state.tab = 'bank';
     state.quiz = null;
     state.senses = null;
@@ -232,7 +426,7 @@ function startSync(u) {
       state.words = words;
       saveCache(u.uid, words);
       state.syncError = '';
-      if (state.cardIndex >= words.length) { state.cardIndex = 0; state.flipped = false; }
+      rebuildDeck();
       render();
     }, function (err) {
       state.syncError = 'Could not sync with the cloud \u7121\u6CD5\u540C\u6B65: ' + err.message;
@@ -636,6 +830,7 @@ function bankHTML() {
             '<span class="text-xl font-bold tracking-tight">' + esc(w.word) + '</span>' +
             '<span class="text-xs uppercase tracking-widest text-neutral-500">' + esc(w.pos) + '</span>' +
             (w.ipa ? '<span class="text-xs text-neutral-400">' + esc(w.ipa) + '</span>' : '') +
+            '<span class="text-xs uppercase tracking-widest ' + (isDue(w) ? 'text-red-600' : 'text-neutral-400') + '">' + dueLabel(w) + '</span>' +
             '<button data-action="speak" data-word="' + esc(w.word) + '" title="Listen \u767C\u97F3" class="text-neutral-400 hover:text-red-600 transition-colors"><span class="pointer-events-none">' + IC.volume(14) + '</span></button>' +
           '</div>' +
           '<p class="text-sm text-neutral-800 mt-1">' + esc(w.meaning) + '</p>' +
@@ -672,46 +867,121 @@ function bankHTML() {
 }
 
 // ---------- Render: flashcards tab ----------
+function deckToggleHTML() {
+  var dueCount = state.words.filter(isDue).length;
+  function seg(mode, label) {
+    var active = state.deckMode === mode;
+    return '<button data-action="deck-mode" data-mode="' + mode + '" class="flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-colors ' +
+      (active ? 'bg-black text-white' : 'bg-white hover:bg-neutral-100') + '"><span class="pointer-events-none">' + label + '</span></button>';
+  }
+  return '<div class="flex border-2 border-black mb-5">' +
+    seg('all', 'All \u5168\u90E8 (' + state.words.length + ')') +
+    '<div class="w-px bg-black"></div>' +
+    seg('due', 'Due \u5230\u671F (' + dueCount + ')') +
+  '</div>';
+}
+
 function cardsHTML() {
   if (state.words.length === 0) {
     return '<div class="pt-8"><p class="text-sm text-neutral-400 py-10">Add some words first. \u8ACB\u5148\u65B0\u589E\u55AE\u5B57\u3002</p></div>';
   }
-  var w = state.words[state.cardIndex];
-  return '<div class="pt-8">' +
-    '<div class="flex justify-between items-baseline mb-4">' +
-      '<p class="text-xs uppercase tracking-widest">\u5B57\u5361 ' + pad2(state.cardIndex + 1) + ' / ' + pad2(state.words.length) + '</p>' +
-      '<p class="text-xs uppercase tracking-widest text-neutral-500">Tap to flip \u9EDE\u64CA\u7FFB\u9762</p>' +
+
+  var stats = state.sessionStats;
+
+  // Session finished (all cards rated) or nothing currently due
+  if (state.deckIds.length === 0) {
+    var ratedCount = stats.good + stats.again;
+    var inner;
+    if (ratedCount > 0) {
+      inner = '<p class="text-xs uppercase tracking-widest text-red-600 mb-3">Session complete \u672C\u8F2A\u5B8C\u6210</p>' +
+        '<p class="text-5xl font-bold tracking-tight mb-4">' + stats.good + '<span class="text-neutral-300"> \u2713</span>&nbsp;&nbsp;' + stats.again + '<span class="text-red-600"> \u21BB</span></p>' +
+        '<p class="text-sm text-neutral-600 mb-8 max-w-md">' +
+          (stats.again > 0
+            ? 'Cards you swiped right stay due \u2014 restart the session (or use the Due filter) and they will come back. \u5411\u53F3\u6ED1\u7684\u5361\u7247\u4ECD\u7136\u5230\u671F\uFF0C\u91CD\u65B0\u958B\u59CB\u5F8C\u6703\u518D\u6B21\u51FA\u73FE\u3002'
+            : 'Every card marked known. Intervals have grown \u2014 come back when they are due. \u5168\u90E8\u6A19\u8A18\u70BA\u8A18\u5F97\uFF0C\u8907\u7FD2\u9593\u9694\u5DF2\u5EF6\u9577\uFF0C\u5230\u671F\u6642\u518D\u56DE\u4F86\u5427\u3002') +
+        '</p>';
+    } else {
+      inner = '<p class="text-xs uppercase tracking-widest text-red-600 mb-3">All caught up \u5168\u90E8\u5B8C\u6210</p>' +
+        '<p class="text-3xl font-bold tracking-tight mb-4">Nothing due right now.</p>' +
+        '<p class="text-sm text-neutral-600 mb-8 max-w-md">No cards are due for review. Switch to \u201CAll\u201D to browse freely, or come back later. \u76EE\u524D\u6C92\u6709\u5230\u671F\u7684\u5361\u7247\uFF0C\u53EF\u5207\u63DB\u81F3\u300C\u5168\u90E8\u300D\u81EA\u7531\u700F\u89BD\uFF0C\u6216\u7A0D\u5F8C\u518D\u4F86\u3002</p>';
+    }
+    return '<div class="pt-8">' + deckToggleHTML() +
+      '<div class="border-4 border-black p-8 fade-in">' + inner +
+        '<button data-action="restart-session" class="flex items-center gap-3 bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest px-8 py-4 transition-colors">' +
+          '<span class="pointer-events-none">' + IC.redo(14) + '</span><span class="pointer-events-none">Restart session \u91CD\u65B0\u958B\u59CB</span>' +
+        '</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  var w = wordById(state.deckIds[state.cardIndex]);
+  if (!w) { rebuildDeck(); w = wordById(state.deckIds[0]) || state.words[0]; }
+  var status = dueLabel(w);
+
+  return '<div class="pt-8">' + deckToggleHTML() +
+    '<div class="flex justify-between items-baseline mb-2">' +
+      '<p class="text-xs uppercase tracking-widest">\u5B57\u5361 ' + pad2(state.cardIndex + 1) + ' / ' + pad2(state.deckIds.length) +
+        '<span class="text-neutral-500"> \u2014 ' + (state.deckShuffled ? 'Shuffled \u5DF2\u6D17\u724C' : 'Newest first \u4F9D\u5E8F') + '</span>' +
+      '</p>' +
+      '<p class="text-xs uppercase tracking-widest text-neutral-500">\u2713 ' + stats.good + ' \u00B7 \u21BB ' + stats.again + '</p>' +
     '</div>' +
-    '<div data-action="flip" class="w-full h-80 cursor-pointer card3d">' +
-      '<div id="cardInner" class="card-inner' + (state.flipped ? ' flipped' : '') + '">' +
-        '<div class="card-face bg-black text-white flex flex-col justify-between p-8 pointer-events-none">' +
-          '<div class="flex justify-between items-start">' +
-            '<span class="text-xs uppercase tracking-widest text-neutral-400">' + esc(w.pos) + '</span>' +
-            '<span class="w-4 h-4 bg-red-600 block"></span>' +
-          '</div>' +
-          '<div>' +
-            '<span class="text-4xl sm:text-5xl font-bold tracking-tight break-words">' + esc(w.word) + '</span>' +
-            '<div class="flex items-center gap-3 mt-3">' +
-              '<span class="text-neutral-400 text-sm">' + esc(w.ipa) + '</span>' +
-              '<button data-action="speak" data-word="' + esc(w.word) + '" class="pointer-events-auto text-neutral-400 hover:text-white transition-colors"><span class="pointer-events-none">' + IC.volume(18) + '</span></button>' +
+    '<p class="text-xs uppercase tracking-widest text-neutral-500 mb-4">Tap to flip \u9EDE\u64CA\u7FFB\u9762 \u2014 swipe \u2190 got it \u8A18\u5F97 \u00B7 swipe \u2192 revisit \u9700\u8907\u7FD2</p>' +
+    (state.lastRating ? '<p class="text-xs uppercase tracking-widest text-red-600 font-bold mb-4 fade-in">' + esc(state.lastRating) + '</p>' : '') +
+    '<div class="relative select-none" style="touch-action: pan-y;">' +
+      '<div id="swipeCard" class="w-full h-80 cursor-grab card3d relative">' +
+        '<div id="cardInner" class="card-inner' + (state.flipped ? ' flipped' : '') + '">' +
+          '<div class="card-face bg-black text-white flex flex-col justify-between p-8 pointer-events-none">' +
+            '<div class="flex justify-between items-start">' +
+              '<span class="text-xs uppercase tracking-widest text-neutral-400">' + esc(w.pos) + ' \u2014 ' + status + '</span>' +
+              '<span class="w-4 h-4 bg-red-600 block"></span>' +
+            '</div>' +
+            '<div>' +
+              '<span class="text-4xl sm:text-5xl font-bold tracking-tight break-words">' + esc(w.word) + '</span>' +
+              '<div class="flex items-center gap-3 mt-3">' +
+                '<span class="text-neutral-400 text-sm">' + esc(w.ipa) + '</span>' +
+                '<button data-action="speak" data-word="' + esc(w.word) + '" class="pointer-events-auto text-neutral-400 hover:text-white transition-colors"><span class="pointer-events-none">' + IC.volume(18) + '</span></button>' +
+              '</div>' +
             '</div>' +
           '</div>' +
-        '</div>' +
-        '<div class="card-face card-back bg-white border-4 border-black flex flex-col justify-between p-8 pointer-events-none">' +
-          '<div>' +
-            '<p class="text-xs uppercase tracking-widest text-red-600 mb-2">\u91CB\u7FA9 \u2014 Meaning</p>' +
-            '<p class="text-lg font-bold leading-snug">' + esc(w.meaning) + '</p>' +
+          '<div class="card-face card-back bg-white border-4 border-black flex flex-col justify-between p-8 pointer-events-none">' +
+            '<div>' +
+              '<p class="text-xs uppercase tracking-widest text-red-600 mb-2">\u91CB\u7FA9 \u2014 Meaning</p>' +
+              '<p class="text-lg font-bold leading-snug">' + esc(w.meaning) + '</p>' +
+            '</div>' +
+            (w.example ?
+              '<div><p class="text-xs uppercase tracking-widest text-neutral-500 mb-2">\u4F8B\u53E5 \u2014 Example</p>' +
+              '<p class="text-sm text-neutral-700">\u300C' + esc(w.example) + '\u300D</p></div>' : '') +
           '</div>' +
-          (w.example ?
-            '<div><p class="text-xs uppercase tracking-widest text-neutral-500 mb-2">\u4F8B\u53E5 \u2014 Example</p>' +
-            '<p class="text-sm text-neutral-700">\u300C' + esc(w.example) + '\u300D</p></div>' : '') +
         '</div>' +
+        // Swipe stamps (move with the card while dragging)
+        '<div id="hintKnow" class="absolute top-5 left-5 z-10 opacity-0 pointer-events-none bg-white text-black border-2 border-black text-xs font-bold uppercase tracking-widest px-3 py-2 -rotate-6">\u2713 Got it \u8A18\u5F97</div>' +
+        '<div id="hintAgain" class="absolute top-5 right-5 z-10 opacity-0 pointer-events-none bg-red-600 text-white text-xs font-bold uppercase tracking-widest px-3 py-2 rotate-6">\u21BB Revisit \u9700\u8907\u7FD2</div>' +
       '</div>' +
     '</div>' +
     '<div class="grid grid-cols-3 border-2 border-black mt-6">' +
       '<button data-action="prev-card" class="flex items-center justify-center py-4 border-r-2 border-black hover:bg-neutral-100 transition-colors"><span class="pointer-events-none">' + IC.left(18) + '</span></button>' +
-      '<button data-action="flip" class="py-4 text-xs font-bold uppercase tracking-widest bg-black text-white hover:bg-red-600 transition-colors"><span class="pointer-events-none">Flip \u7FFB\u9762</span></button>' +
+      '<button data-action="flip" class="py-4 text-xs font-bold uppercase tracking-widest bg-black text-white hover:bg-neutral-800 transition-colors"><span class="pointer-events-none">Flip \u7FFB\u9762</span></button>' +
       '<button data-action="next-card" class="flex items-center justify-center py-4 border-l-2 border-black hover:bg-neutral-100 transition-colors"><span class="pointer-events-none">' + IC.right(18) + '</span></button>' +
+    '</div>' +
+    '<div class="grid grid-cols-2 border-2 border-black border-t-0">' +
+      '<button data-action="rate-good" class="flex flex-col items-center justify-center gap-1 py-4 border-r-2 border-black hover:bg-black hover:text-white transition-colors group">' +
+        '<span class="flex items-center gap-2 text-xs font-bold uppercase tracking-widest pointer-events-none">' + IC.check(14) + ' Got it \u8A18\u5F97</span>' +
+        '<span class="text-xs text-neutral-400 pointer-events-none">swipe left \u5DE6\u6ED1 \u2190</span>' +
+      '</button>' +
+      '<button data-action="rate-again" class="flex flex-col items-center justify-center gap-1 py-4 text-red-600 hover:bg-red-600 hover:text-white transition-colors">' +
+        '<span class="flex items-center gap-2 text-xs font-bold uppercase tracking-widest pointer-events-none">' + IC.clock(14) + ' Revisit \u9700\u8907\u7FD2</span>' +
+        '<span class="text-xs opacity-60 pointer-events-none">swipe right \u53F3\u6ED1 \u2192</span>' +
+      '</button>' +
+    '</div>' +
+    '<div class="grid grid-cols-2 border-2 border-black border-t-0">' +
+      '<button data-action="shuffle-deck" class="flex items-center justify-center gap-2 py-4 border-r-2 border-black text-xs font-bold uppercase tracking-widest hover:bg-black hover:text-white transition-colors">' +
+        '<span class="pointer-events-none">' + IC.shuffle(14) + '</span>' +
+        '<span class="pointer-events-none">' + (state.deckShuffled ? 'Shuffle again \u518D\u6D17\u4E00\u6B21' : 'Shuffle deck \u6D17\u724C') + '</span>' +
+      '</button>' +
+      '<button data-action="reset-deck" ' + (state.deckShuffled ? '' : 'disabled') + ' class="flex items-center justify-center gap-2 py-4 text-xs font-bold uppercase tracking-widest hover:bg-neutral-100 disabled:text-neutral-300 disabled:hover:bg-white transition-colors">' +
+        '<span class="pointer-events-none">' + IC.list(14) + '</span>' +
+        '<span class="pointer-events-none">Reset order \u4F9D\u5E8F</span>' +
+      '</button>' +
     '</div>' +
   '</div>';
 }
@@ -728,7 +998,7 @@ function quizHTML() {
     return '<div class="pt-8"><div class="border-4 border-black p-8">' +
       '<p class="text-xs uppercase tracking-widest text-red-600 mb-3">Cloze recall \u586B\u7A7A\u6E2C\u9A57</p>' +
       '<h2 class="text-3xl font-bold tracking-tight leading-tight mb-4">The word is removed.<br>You put it back.</h2>' +
-      '<p class="text-sm text-neutral-600 mb-8 max-w-md">Each target word is blanked out of its example sentence. Choose the correct word from four options. \u4F8B\u53E5\u4E2D\u7684\u76EE\u6A19\u55AE\u5B57\u5DF2\u88AB\u6316\u7A7A\uFF0C\u8ACB\u5F9E\u56DB\u500B\u9078\u9805\u4E2D\u9078\u51FA\u6B63\u78BA\u7684\u5B57\u3002</p>' +
+      '<p class="text-sm text-neutral-600 mb-8 max-w-md">Each target word is blanked out of its example sentence. Choose the correct word from four options. Questions and options are freshly shuffled every time. \u4F8B\u53E5\u4E2D\u7684\u76EE\u6A19\u55AE\u5B57\u5DF2\u88AB\u6316\u7A7A\uFF0C\u8ACB\u5F9E\u56DB\u500B\u9078\u9805\u4E2D\u9078\u51FA\u6B63\u78BA\u7684\u5B57\uFF1B\u6BCF\u6B21\u984C\u76EE\u8207\u9078\u9805\u90FD\u6703\u91CD\u65B0\u6D17\u724C\u3002</p>' +
       '<button data-action="start-quiz" class="flex items-center gap-3 bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest px-8 py-4 transition-colors">' +
         '<span class="pointer-events-none">Start \u958B\u59CB \u2014 ' + Math.min(10, eligible.length) + ' questions</span>' +
         '<span class="pointer-events-none">' + IC.arrow(14) + '</span>' +
@@ -748,7 +1018,7 @@ function quizHTML() {
       '<p class="text-6xl sm:text-7xl font-bold tracking-tight">' + q.score + '<span class="text-neutral-300">/' + q.questions.length + '</span></p>' +
       '<p class="text-sm text-neutral-600 mt-4 mb-8 max-w-md">' + verdict + '</p>' +
       '<button data-action="start-quiz" class="flex items-center gap-3 bg-black hover:bg-red-600 text-white text-xs font-bold uppercase tracking-widest px-8 py-4 transition-colors">' +
-        '<span class="pointer-events-none">' + IC.redo(14) + '</span><span class="pointer-events-none">Retake \u518D\u6E2C\u4E00\u6B21</span>' +
+        '<span class="pointer-events-none">' + IC.shuffle(14) + '</span><span class="pointer-events-none">Reshuffle & retake \u91CD\u6D17\u518D\u6E2C</span>' +
       '</button>' +
     '</div></div>';
   }
@@ -761,7 +1031,13 @@ function quizHTML() {
   var html = '<div class="pt-8">' +
     '<div class="flex justify-between items-baseline mb-2">' +
       '<p class="text-xs uppercase tracking-widest">\u984C\u76EE ' + pad2(quiz.current + 1) + ' / ' + pad2(quiz.questions.length) + '</p>' +
-      '<p class="text-xs uppercase tracking-widest text-neutral-500">Score \u5F97\u5206 ' + quiz.score + '</p>' +
+      '<div class="flex items-baseline gap-4">' +
+        '<p class="text-xs uppercase tracking-widest text-neutral-500">Score \u5F97\u5206 ' + quiz.score + '</p>' +
+        '<button data-action="start-quiz" title="Restart with freshly shuffled questions \u91CD\u65B0\u6D17\u724C\u4E26\u91CD\u65B0\u958B\u59CB" class="flex items-center gap-1 text-xs uppercase tracking-widest text-neutral-500 hover:text-red-600 transition-colors">' +
+          '<span class="pointer-events-none">' + IC.shuffle(12) + '</span>' +
+          '<span class="pointer-events-none">Reshuffle \u91CD\u6D17</span>' +
+        '</button>' +
+      '</div>' +
     '</div>' +
     '<div class="w-full h-1 bg-neutral-200 mb-8"><div class="h-1 bg-red-600 transition-all duration-300" style="width:' + pct + '%"></div></div>' +
     '<p class="text-xs uppercase tracking-widest text-red-600 mb-3">Fill the gap \u586B\u7A7A</p>' +
@@ -981,10 +1257,7 @@ function addWord() {
 
 // ---------- Editing ----------
 function startEdit(id) {
-  var w = null;
-  for (var i = 0; i < state.words.length; i++) {
-    if (state.words[i].id === id) { w = state.words[i]; break; }
-  }
+  var w = wordById(id);
   if (!w) return;
   state.editingId = id;
   state.editForm = {
@@ -1086,6 +1359,7 @@ document.addEventListener('click', function (e) {
   } else if (action === 'tab') {
     state.tab = el.getAttribute('data-tab');
     state.flipped = false;
+    if (state.tab === 'cards') rebuildDeck(); // re-check what is due
     render();
   } else if (action === 'lookup') {
     doLookup();
@@ -1125,12 +1399,32 @@ document.addEventListener('click', function (e) {
     if (inner) inner.classList.toggle('flipped', state.flipped);
   } else if (action === 'prev-card') {
     state.flipped = false;
-    state.cardIndex = (state.cardIndex - 1 + state.words.length) % state.words.length;
+    state.lastRating = '';
+    state.cardIndex = (state.cardIndex - 1 + state.deckIds.length) % state.deckIds.length;
     render();
   } else if (action === 'next-card') {
     state.flipped = false;
-    state.cardIndex = (state.cardIndex + 1) % state.words.length;
+    state.lastRating = '';
+    state.cardIndex = (state.cardIndex + 1) % state.deckIds.length;
     render();
+  } else if (action === 'rate-good') {
+    rateCard(true);
+  } else if (action === 'rate-again') {
+    rateCard(false);
+  } else if (action === 'deck-mode') {
+    state.deckMode = el.getAttribute('data-mode');
+    resetSession();
+    rebuildDeck();
+    render();
+  } else if (action === 'restart-session') {
+    resetSession();
+    rebuildDeck();
+    if (state.deckShuffled) state.deckIds = shuffle(state.deckIds);
+    render();
+  } else if (action === 'shuffle-deck') {
+    shuffleDeck();
+  } else if (action === 'reset-deck') {
+    resetDeck();
   } else if (action === 'start-quiz') {
     startQuiz();
   } else if (action === 'answer') {
